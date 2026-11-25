@@ -60,3 +60,5 @@ dialog:has(.market-grid){max-width:min(1060px,95vw);width:1060px}.market-ticker{
  .below-ocean .cast-btn{font-size:16px}.fight-card p,.fight-bottom,.fight-bottom button{font-size:14px}
 }
 .settings-actions a{display:inline-flex;align-items:center;text-decoration:none;color:#ffe09b;background:#253c39;border:1px solid #8d815b;border-radius:3px;padding:8px 14px;font-size:14px}
+#boss-help[hidden]{display:none}#boss-help{grid-column:1/-1}
+@media(min-width:1000px) and (max-height:830px){.shell{padding-top:10px}.depth-tools{padding:5px 12px}.below-ocean{padding:8px 14px}.save-indicator{margin-top:0}.layout{margin-top:4px}}

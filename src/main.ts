@@ -64,7 +64,7 @@ document.querySelector('#app')!.innerHTML = `<main class="shell">
 <header class="topbar"><div class="brand"><div class="brand-mark">♆</div><div><strong>ABYSS</strong><small>THE DEEP SEA JOURNAL</small></div></div><button class="nav-btn active" id="home">항해 일지</button><button class="nav-btn expedition-nav" id="expedition">⚓ 심해 원정</button><button class="nav-btn forge-nav" id="fish-forge">🐟 어종 강화</button><button class="nav-btn market-nav" id="market">◈ 어시장</button><button class="nav-btn" id="book">물고기 도감 ↗</button><button class="nav-btn" id="ranking">선장 랭킹</button><button class="nav-btn" id="help">플레이 안내</button><div class="wallet"><span class="coin">◈</span><div><small>보유 골드</small><span id="gold"></span></div></div><button class="icon-btn" id="sound" aria-label="효과음 켜기">소리 OFF</button></header>
 <section class="intro"><div><div class="eyebrow">A LITTLE BOAT. AN ENDLESS OCEAN.</div><h1>깊은 바다, 작은 모험 <span>낚시 일지</span></h1><p>느긋하게 낚고, 더 깊이 탐험하세요. 바다에는 아직 만나지 못한 이야기가 있습니다.</p></div><div class="weather">☀ 맑음 <span>잔잔한 파도</span><span id="save-status">● 자동 저장</span></div></section>
 <div class="layout"><section><div class="ocean-card"><div class="ocean-head"><span class="live">LIVE EXPEDITION</span><span id="sea-code"></span><b id="sea-depth"></b></div><div class="viewport"><div id="game" aria-label="물고기를 클릭해 낚시하는 바다"></div><div class="sea-badge"><small id="sea-en"></small><span id="sea-name"></span></div><div class="depth-scale"><span>0 m ─</span><span>──</span><span>100 m ─</span><span>──</span><span>200 m ─</span></div><div class="scene-hint">물고기를 클릭하거나 아래 버튼으로 낚시를 시작하세요</div><div id="minigame" hidden></div></div><div class="depth-tools"><button id="goal"></button><div><button id="shallow">얕은 층</button><button id="deep">깊은 층</button></div></div><div class="below-ocean"><button class="cast-btn" id="cast">⌁ 낚싯줄 던지기</button><button class="net-btn" id="net">▦ 그물 내리기 <span id="net-label"></span></button><p>클릭 / 터치로 낚시 · SPACE로 시작<br>그물은 시간이 지나면 다시 사용할 수 있어요</p></div></div><div class="stats"><div class="stat"><i>⌁</i><div><small>누적 포획</small><strong id="total"></strong><em>마리</em></div></div><div class="stat"><i>▤</i><div><small>발견한 어종</small><strong id="discovered"></strong><em>/ ${species.length}종</em></div></div><div class="stat"><i>✧</i><div><small>희귀 변종</small><strong id="shiny-count"></strong><em>마리</em></div></div></div></section>
-<aside class="sidebar"><section class="panel"><div class="panel-title">해역 탐사 <small>EXPEDITION</small></div><h2 class="mission-name" id="mission"></h2><p id="perk"></p><div class="bar-label"><span>보스 조우까지</span><span id="boss-progress"></span></div><div class="bar"><div id="boss-bar"></div></div><button class="boss-btn" id="boss"></button><div class="research"><span id="research-text"></span><button id="research">보상 받기</button></div></section>
+<aside class="sidebar"><section class="panel"><div class="panel-title">해역 탐사 <small>EXPEDITION</small></div><h2 class="mission-name" id="mission"></h2><p id="perk"></p><div class="bar-label"><span>보스 조우까지</span><span id="boss-progress"></span></div><div class="bar"><div id="boss-bar"></div></div><button class="boss-btn" id="boss"></button><button class="boss-btn" id="boss-help" hidden>연습 도움으로 도전</button><div class="research"><span id="research-text"></span><button id="research">보상 받기</button></div></section>
 <section class="panel"><div class="panel-title">장비 공방 <small>WORKSHOP</small></div><div class="depth-shop"><button class="upgrade" id="line"></button><button class="upgrade" id="reel"></button></div><div class="gear-section"><div class="gear"><div class="gear-icon">⌁</div><div><strong id="rod-name"></strong><small id="rod-effect"></small></div></div><button class="upgrade" id="rod-up"><span>낚싯대 강화 ↑</span><span id="rod-price"></span></button></div><div class="gear-section"><div class="gear"><div class="gear-icon">⚓</div><div><strong id="boat-name"></strong><small id="boat-effect"></small></div></div><button class="upgrade" id="boat-up"><span>어선 강화 ↑</span><span id="boat-price"></span></button></div><div class="gear-section rod-fish-section"><div class="gear"><div class="gear-icon" id="rod-fish-icon">🐟</div><div><strong id="rod-fish-name">결합된 미페 없음</strong><small id="rod-fish-effect">강화한 물고기를 낚싯대에 장착하세요.</small></div></div><button class="upgrade" id="open-forge"><span>미페 강화 · 낚싯대 결합</span><span>열기 ↗</span></button></div></section>
 <section class="panel"><div class="panel-title">다음 바다로 <small>NAVIGATION</small></div><p id="nav-description"></p><div class="sea-nav"><button id="prev">← 이전 해역</button><button id="next">다음 해역 →</button></div><p class="next-note" id="next-note"></p></section></aside></div>
 <section class="journal"><span class="journal-label">RECENT DISCOVERIES</span><div class="catch-list" id="recent"></div><button id="open-log">전체 도감 보기 ↗</button></section><footer class="footer"><span>ABYSS / VOL. 01 — THE OCEAN IS CALLING</span><span>Phaser 4 · 브라우저에 진행 상황 자동 저장</span></footer></main><div id="toast" role="status"></div><dialog id="modal"><div class="modal-head"><div><h2 id="modal-title"></h2><p id="modal-desc"></p></div><button class="close" id="close-modal" aria-label="닫기">✕</button></div><div class="modal-body" id="modal-body"></div></dialog>`;
@@ -269,6 +269,8 @@ function refresh() {
         ? 'BOSS · 재도전하기 ↗'
         : 'BOSS · ' + sea.boss + ' 도전 ↗';
   ($('boss') as HTMLButtonElement).disabled = busy || !!expeditionRun || !bossReady(state);
+  $('boss-help').hidden = !!expeditionRun || state.bossMisses[state.sea] < 3 || !bossReady(state);
+  $<HTMLButtonElement>('boss-help').disabled = busy;
   const found = species.filter((f) => f.sea === state.sea && state.counts[f.id] > 0).length;
   $('research-text').textContent = `어종 연구 ${Math.min(found, 5)} / 5`;
   $('research').textContent = state.claimed[state.sea] ? '수령 완료' : `+${150 * (state.sea + 1)} G`;
@@ -1265,6 +1267,16 @@ async function beginBoss(expedition = false, practice = false) {
   };
   frame = requestAnimationFrame(tick);
 }
+const sceneHint = document.querySelector<HTMLElement>('.scene-hint')!;
+ocean.onFishHover = (id, shiny) => {
+  if (id === null || busy) {
+    sceneHint.textContent = '물고기 위에 마우스를 올려 어종과 난이도 확인';
+    return;
+  }
+  const f = species[id],
+    rounds = fishingRules(f.rank, f.sea, state.rod).rounds;
+  sceneHint.textContent = `${shiny ? '✧ 황금 · ' : ''}${f.name} · ${ranks[f.rank]} · 기본 ${rounds}라운드 · 클릭해서 낚기`;
+};
 ocean.onFish = (...args) => {
   if (!expeditionRun) void beginFish(...args);
 };
@@ -1290,6 +1302,9 @@ $('net').onclick = () => {
   }, 2500);
 };
 $('boss').onclick = () => void beginBoss();
+$('boss-help').onclick = () => {
+  if (state.bossMisses[state.sea] >= 3) void beginBoss(false, true);
+};
 for (const kind of ['rod', 'boat'] as const)
   $(kind + '-up').onclick = () => {
     if (busy || expeditionRun || !upgrade(state, kind)) return;

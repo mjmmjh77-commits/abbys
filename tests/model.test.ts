@@ -128,3 +128,15 @@ test('보스 조건과 첫 보상, 영구 출항', () => {
   assert.ok(canTravel(s, 1));
   assert.ok(!canTravel(s, 5));
 });
+
+test('이관한 거래 카드가 강화에 소모되면 이후 포획으로 매도권이 되살아나지 않는다', () => {
+  const s = fresh();
+  s.counts[0] = 3;
+  s.tradable[0] = 2;
+  assert.ok(enhanceFish(s, 0, [0], () => 0));
+  assert.equal(s.tradable[0], 1);
+  settleCatch(s, 0, false, 'manual', () => 0);
+  assert.equal(sellFish(s, 0, 2), null);
+  assert.ok(sellFish(s, 0, 1));
+  assert.equal(sellFish(s, 0), null);
+});

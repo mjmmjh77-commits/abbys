@@ -72,6 +72,22 @@ try {
   const before = await read();
   await page.locator('#expedition').click();
   await page.locator('[data-loadout="steady"]').click();
+  await page.locator('[data-route="calm"]').click();
+  await page.locator('#track').waitFor();
+  const catchDeadline = Date.now() + 30000;
+  while ((await read()).counts.reduce((a, b) => a + b, 0) === before.counts.reduce((a, b) => a + b, 0)) {
+    assert.ok(Date.now() < catchDeadline);
+    const dot = await page.locator('#fish-dot').boundingBox();
+    if (dot) await page.mouse.move(dot.x + dot.width / 2, dot.y + dot.height / 2);
+    await page.waitForTimeout(65);
+  }
+  await page.locator('[data-route="surge"]').click();
+  await page.locator('#escape').click();
+  await page.locator('#run-retreat').click();
+  assert.deepEqual((await read()).survey, before.survey);
+  await page.locator('#expedition').click();
+  await page.locator('[data-loadout="steady"]').click();
+  console.log('PASS 안전 경로 포획, 위험 경로 진입과 취소, 귀환');
   for (let area = 0; area < 5; area++) {
     for (let stop = 0; stop < 2; stop++) {
       await page.locator('[data-route="wreck"]').click();

@@ -276,8 +276,10 @@ export function enhanceFish(s: Save, id: number, materials: number[], rng = Math
   const previousLevel = s.fishLevel[id],
     chance = fishEnhanceChance(previousLevel, s.fishFailures[id], materials, id);
   for (const [materialId, count] of used) {
+    const collectionCopies = Math.max(0, fishCopies(s, materialId) - s.tradable[materialId]);
+    const tradedMaterials = Math.max(0, count - collectionCopies);
+    s.tradable[materialId] -= tradedMaterials;
     s.fishSpent[materialId] += count;
-    s.tradable[materialId] = Math.min(s.tradable[materialId], fishCards(s, materialId));
   }
   const success = rng() < chance;
   let detached = false;

@@ -101,7 +101,31 @@ try {
   await page.locator('#practice').click();
   assert.equal((await saved(page)).bossMisses[0], 3);
   await page.locator('#escape').click();
-  console.log('PASS 보스 실패, 3회 연습 도움 선택과 취소');
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('#boss-help').click();
+  await page.locator('#track').waitFor();
+  const deadline = Date.now() + 45000;
+  while (!(await saved(page)).bosses[0]) {
+    assert.ok(Date.now() < deadline, '도움 적용 보스 첫 승리');
+    const point = await page
+      .locator('#fish-dot')
+      .boundingBox({ timeout: 100 })
+      .catch(() => null);
+    if (point) await page.mouse.move(point.x + point.width / 2, point.y + point.height / 2);
+    else
+      await page.evaluate(() => {
+        const ring = document.getElementById('ring');
+        if (ring && (ring.textContent === '길게 누르기' || ring.style.background === 'rgb(80, 118, 91)'))
+          ring.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space' }));
+      });
+    await page.waitForTimeout(55);
+  }
+  assert.ok((await saved(page)).unlocked[1]);
+  await page.locator('#next').click();
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('abyss-fishing-v2')).sea === 1);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  assert.equal((await saved(page)).sea, 1);
+  console.log('PASS 보스 실패·취소·새로고침 후 도움 재선택·첫 승리 출항');
 
   if (process.env.RANKING_QA === '1') {
     const name = '선장' + Date.now().toString().slice(-7);

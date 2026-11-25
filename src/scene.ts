@@ -7,6 +7,7 @@ type Swimmer={sprite:Phaser.GameObjects.Image;id:number;shiny:boolean;speed:numb
 export class Ocean extends Phaser.Scene {
  onReady:()=>void=()=>{};
  layer: "deep"|"shallow"="shallow"; sea=0; locked=false; swimmers:Swimmer[]=[];
+ onFishHover:(id:number|null,shiny?:boolean)=>void=()=>{};
  onFish:(id:number,shiny:boolean,x:number,y:number)=>void=()=>{};
  bg!:Phaser.GameObjects.Graphics; decor!:Phaser.GameObjects.Graphics; line!:Phaser.GameObjects.Graphics;
  boat!:Phaser.GameObjects.Image; rod!:Phaser.GameObjects.Graphics;
@@ -29,7 +30,7 @@ export class Ocean extends Phaser.Scene {
  }
  setEquipment(rod:number,boat:number){this.rodLevel=rod;this.boatLevel=boat;if(this.boat)this.boat.setTexture('boat'+boat);}
  setSea(n:number){
-  this.sea=n;if(!this.bg)return;this.tweens.killAll();this.line.clear();
+  this.sea=n;this.onFishHover(null);if(!this.bg)return;this.tweens.killAll();this.line.clear();
   this.children.list.filter(c=>c.getData('temporary')).forEach(c=>c.destroy());
   this.swimmers.forEach(f=>f.sprite.destroy());this.swimmers=[];
   this.boss?.destroy();this.bossLabel?.destroy();this.boss=undefined;this.bossLabel=undefined;
@@ -66,6 +67,8 @@ export class Ocean extends Phaser.Scene {
   const id=pickFish(this.sea,this.layer),shiny=Math.random()<goldenChance,f=species[id];
   const sprite=this.add.image(x??Phaser.Math.Between(60,890),y??Phaser.Math.Between(215,510),(shiny?'s':'f')+id).setScale(.9+f.rank*.12).setInteractive();
   const swimmer={sprite,id,shiny,speed:(Math.random()<.5?-1:1)*(12+Math.random()*18)*(this.sea===1?1.3:1),baseY:sprite.y,phase:Math.random()*7};sprite.setFlipX(swimmer.speed<0);
+  sprite.on('pointerover',()=>{if(!this.locked)this.onFishHover(id,shiny);});
+  sprite.on('pointerout',()=>this.onFishHover(null));
   sprite.on('pointerdown',()=>{if(!this.locked)this.onFish(id,shiny,sprite.x,sprite.y);});this.swimmers.push(swimmer);
  }
  setBoss(available:boolean,cleared=false){
