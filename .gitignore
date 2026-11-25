@@ -4,3 +4,4 @@ dist/
 .ranking-data/
 .env.local
 .firebase/
+dist-showcase/

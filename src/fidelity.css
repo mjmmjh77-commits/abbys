@@ -62,3 +62,47 @@ dialog:has(.market-grid){max-width:min(1060px,95vw);width:1060px}.market-ticker{
 .settings-actions a{display:inline-flex;align-items:center;text-decoration:none;color:#ffe09b;background:#253c39;border:1px solid #8d815b;border-radius:3px;padding:8px 14px;font-size:14px}
 #boss-help[hidden]{display:none}#boss-help{grid-column:1/-1}
 @media(min-width:1000px) and (max-height:830px){.shell{padding-top:10px}.depth-tools{padding:5px 12px}.below-ocean{padding:8px 14px}.save-indicator{margin-top:0}.layout{margin-top:4px}}
+
+#trail-panel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 10px;
+  padding: 10px 14px;
+  border: 1px solid #385a5c;
+  border-left: 3px solid #638f86;
+  background: #102a32;
+}
+#trail-panel[hidden] { display: none; }
+#trail-art {
+  display: grid;
+  place-items: center;
+  flex: 0 0 80px;
+  width: 80px;
+  height: 48px;
+  image-rendering: pixelated;
+}
+#trail-art canvas { display: block; width: 80px; height: 48px; image-rendering: pixelated; }
+#trail-panel:not([data-state="complete"]) :is(canvas#trail-art, #trail-art canvas) {
+  filter: brightness(0) saturate(100%) invert(67%) sepia(14%) saturate(580%) hue-rotate(119deg);
+}
+#trail-panel .trail-copy { flex: 1 1 230px; min-width: 0; }
+#trail-panel .trail-copy small { margin-right: 8px; color: #a8c7bd; font-size: 12px; }
+#trail-title { color: #ecf5dc; font-size: 16px; font-weight: 700; }
+#trail-panel #trail-clue { margin: 3px 0; color: #d8e8df; font-size: 14px; line-height: 1.4; }
+#trail-panel #trail-progress { color: #abd5c5; font-size: 13px; font-variant-numeric: tabular-nums; }
+#trail-cast {
+  padding: 8px 12px;
+  border: 1px solid #6d9289;
+  border-radius: 3px;
+  background: #24423f;
+  color: #e0ede0;
+  font-size: 14px;
+  font-weight: 700;
+}
+#trail-cast:disabled { color: #a7bdb6; border-color: #4a6866; background: #1c3439; }
+#trail-cast:focus-visible { outline: 3px solid #ffe39a; outline-offset: 2px; }
+#trail-panel[data-state="ready"] { border-left-color: #e3c277; }
+#trail-panel[data-state="ready"] #trail-cast:enabled { background: #f0d28a; color: #173337; border-color: #f8dfa4; }
+#trail-panel[data-state="complete"] { border-left-color: #a1c998; }

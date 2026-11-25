@@ -26,11 +26,15 @@ interface Habitat {
   modes: string[];
   shallow: number[];
   deep: number[];
+  trailId: number;
+  trailClue: string;
   fish: FishEntry[];
 }
 const habitats: Habitat[] = [
   {
     id: 'coral',
+    trailId: 6,
+    trailClue: '해초를 감은 작은 꼬리 끝이 물살에도 풀리지 않습니다.',
     name: '햇살 산호해',
     en: 'CORAL COAST',
     note: '파도 아래, 첫 번째 모험',
@@ -63,6 +67,8 @@ const habitats: Habitat[] = [
   },
   {
     id: 'current',
+    trailId: 16,
+    trailClue: '가느다란 은빛 띠가 물살을 거슬러 수직으로 섭니다.',
     name: '푸른 해류',
     en: 'BLUE CURRENT',
     note: '빛이 닿는 마지막 바다',
@@ -95,6 +101,8 @@ const habitats: Habitat[] = [
   },
   {
     id: 'twilight',
+    trailId: 28,
+    trailClue: '어둠 속 여덟 팔을 따라 별처럼 작은 점들이 켜집니다.',
     name: '황혼의 심해',
     en: 'TWILIGHT ZONE',
     note: '어둠 속 작은 불빛을 따라서',
@@ -127,6 +135,8 @@ const habitats: Habitat[] = [
   },
   {
     id: 'vents',
+    trailId: 38,
+    trailClue: '분출이 멎자 바위 뒤로 턱 아래의 붉은 불빛이 흔들립니다.',
     name: '검은 열수구',
     en: 'BLACK VENTS',
     note: '바다의 끝에서 피어나는 생명',
@@ -159,6 +169,8 @@ const habitats: Habitat[] = [
   },
   {
     id: 'hadal',
+    trailId: 48,
+    trailClue: '해구 비탈에서 두 쌍의 두툼한 지느러미가 번갈아 움직입니다.',
     name: '마리아나 해구',
     en: 'THE HADAL',
     note: '아무도 닿지 않은 깊이',

@@ -10,7 +10,9 @@
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "ranking": "pnpm dlx firebase-tools@13.35.1 emulators:start --project demo-abyss --only auth,firestore --import=.ranking-data --export-on-exit=.ranking-data",
     "test:browser": "node --experimental-strip-types tests/browser.mjs",
-    "test:menus": "node --experimental-strip-types tests/menus.mjs"
+    "test:menus": "node --experimental-strip-types tests/menus.mjs",
+    "build:showcase": "tsc --noEmit && vite build --mode showcase",
+    "test:trail": "node --experimental-strip-types tests/trail-browser.mjs"
   },
   "dependencies": {
     "firebase": "^13.4.0",

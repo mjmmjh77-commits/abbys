@@ -23,6 +23,7 @@ export interface Save {
   unlocked: boolean[];
   survey: number[];
   deepCaught: number[];
+  trailCompleted: boolean[];
   maxCm: number[];
   tradable: number[];
   misses: number;
@@ -65,6 +66,7 @@ export const fresh = (): Save => ({
   unlocked: seas.map((_, i) => i === 0),
   survey: seas.map(() => 0),
   deepCaught: seas.map(() => 0),
+  trailCompleted: seas.map(() => false),
   maxCm: species.map(() => 0),
   tradable: species.map(() => 0),
   misses: 0,
@@ -115,6 +117,7 @@ export function parseSave(text: string | null): Save {
     'unlocked',
     'survey',
     'deepCaught',
+    'trailCompleted',
     'maxCm',
     'tradable',
     'misses',
@@ -125,6 +128,7 @@ export function parseSave(text: string | null): Save {
   for (const [key, initial] of Object.entries(base)) {
     if (key === 'version' || (legacy && extra.includes(key))) continue;
     const value = x[key];
+    if (key === 'trailCompleted' && value === undefined) continue;
     if (
       value === undefined &&
       legacy &&
@@ -395,6 +399,24 @@ export function canFish(s: Save, layer: Layer, depth: number) {
     ? s.line[s.sea] && depth >= sea.boundary && depth <= sea.end
     : depth >= sea.start && depth <= sea.boundary;
 }
+export const TRAIL_REQUIRED_CATCHES = 3;
+export function canFollowTrail(s: Save): boolean {
+  return (
+    s.layer === 'deep' &&
+    s.unlocked[s.sea] &&
+    s.line[s.sea] &&
+    s.deepCaught[s.sea] >= TRAIL_REQUIRED_CATCHES &&
+    !s.trailCompleted[s.sea]
+  );
+}
+
+/** Called only after a successful trail encounter has been settled as a manual catch. */
+export function completeTrail(s: Save, id: number): boolean {
+  if (!canFollowTrail(s) || seas[s.sea].trailId !== id || !s.counts[id]) return false;
+  s.trailCompleted[s.sea] = true;
+  return true;
+}
+
 export const bossReady = (s: Save) =>
   s.bosses[s.sea] || (s.survey[s.sea] >= seas[s.sea].target && s.deepCaught[s.sea] > 0);
 export function salePrice(id: number, cm: number, shiny = false) {

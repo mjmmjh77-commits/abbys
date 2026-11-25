@@ -13,6 +13,9 @@ import {
   parseSave,
   buyGear,
   bossReady,
+  TRAIL_REQUIRED_CATCHES,
+  canFollowTrail,
+  completeTrail,
   holdGrace,
   reelGrace,
   netCount,
@@ -68,6 +71,13 @@ document.querySelector('#app')!.innerHTML = `<main class="shell">
 <section class="panel"><div class="panel-title">장비 공방 <small>WORKSHOP</small></div><div class="depth-shop"><button class="upgrade" id="line"></button><button class="upgrade" id="reel"></button></div><div class="gear-section"><div class="gear"><div class="gear-icon">⌁</div><div><strong id="rod-name"></strong><small id="rod-effect"></small></div></div><button class="upgrade" id="rod-up"><span>낚싯대 강화 ↑</span><span id="rod-price"></span></button></div><div class="gear-section"><div class="gear"><div class="gear-icon">⚓</div><div><strong id="boat-name"></strong><small id="boat-effect"></small></div></div><button class="upgrade" id="boat-up"><span>어선 강화 ↑</span><span id="boat-price"></span></button></div><div class="gear-section rod-fish-section"><div class="gear"><div class="gear-icon" id="rod-fish-icon">🐟</div><div><strong id="rod-fish-name">결합된 미페 없음</strong><small id="rod-fish-effect">강화한 물고기를 낚싯대에 장착하세요.</small></div></div><button class="upgrade" id="open-forge"><span>미페 강화 · 낚싯대 결합</span><span>열기 ↗</span></button></div></section>
 <section class="panel"><div class="panel-title">다음 바다로 <small>NAVIGATION</small></div><p id="nav-description"></p><div class="sea-nav"><button id="prev">← 이전 해역</button><button id="next">다음 해역 →</button></div><p class="next-note" id="next-note"></p></section></aside></div>
 <section class="journal"><span class="journal-label">RECENT DISCOVERIES</span><div class="catch-list" id="recent"></div><button id="open-log">전체 도감 보기 ↗</button></section><footer class="footer"><span>ABYSS / VOL. 01 — THE OCEAN IS CALLING</span><span>Phaser 4 · 브라우저에 진행 상황 자동 저장</span></footer></main><div id="toast" role="status"></div><dialog id="modal"><div class="modal-head"><div><h2 id="modal-title"></h2><p id="modal-desc"></p></div><button class="close" id="close-modal" aria-label="닫기">✕</button></div><div class="modal-body" id="modal-body"></div></dialog>`;
+document.querySelector('.ocean-card')!.insertAdjacentHTML('afterend', `
+  <section id="trail-panel" aria-labelledby="trail-title">
+    <canvas id="trail-art" width="80" height="48" aria-hidden="true"></canvas>
+    <div class="trail-copy"><small>해역 관찰 표본</small><strong id="trail-title"></strong>
+      <p id="trail-clue"></p><span id="trail-progress"></span></div>
+    <button id="trail-cast" type="button">흔적 따라 낚기</button>
+  </section>`);
 const missionPanel = document.querySelector('.sidebar .panel')!;
 missionPanel.classList.add('exploration-panel');
 document.querySelector('.stats')!.after(missionPanel);
@@ -201,7 +211,29 @@ function claimQuest(i: number) {
   );
   sound(760);
 }
+function refreshTrail() {
+  const panel = $('trail-panel');
+  panel.hidden = !!expeditionRun;
+  if (expeditionRun) return;
+  const sea = seas[state.sea], fish = species[sea.trailId];
+  const complete = state.trailCompleted[state.sea], ready = canFollowTrail(state);
+  panel.dataset.state = complete ? 'complete' : ready ? 'ready' : state.line[state.sea] ? 'search' : 'locked';
+  const portrait = $<HTMLCanvasElement>('trail-art'), ctx = portrait.getContext('2d')!;
+  ctx.clearRect(0, 0, portrait.width, portrait.height);
+  ctx.drawImage(fishArt(fish.shape, fish.hue), 0, 0);
+  $('trail-title').textContent = complete ? fish.name + ' · 관찰 완료' : sea.name + '의 흔적';
+  $('trail-clue').textContent = sea.trailClue;
+  $('trail-progress').textContent = complete
+    ? `도감에 기록 · 해역 표본 ${state.trailCompleted.filter(Boolean).length}/${seas.length}`
+    : !state.line[state.sea] ? `낚싯줄 ${fmt(sea.end)} m 강화 후 조사 가능`
+    : state.layer !== 'deep' ? '깊은 층을 선택해 흔적을 조사하세요.'
+    : `깊은 층 수동 포획 ${Math.min(TRAIL_REQUIRED_CATCHES, state.deepCaught[state.sea])}/${TRAIL_REQUIRED_CATCHES} · ${ready ? '흔적 발견!' : '어종을 조사하는 중'}`;
+  const button = $<HTMLButtonElement>('trail-cast');
+  button.disabled = busy || !ready;
+  button.textContent = complete ? '관찰 완료' : '흔적 따라 낚기';
+}
 function refresh() {
+  refreshTrail();
   const questReset = syncDailyQuests(state);
   if (questReset) save();
   const runSea = expeditionRun?.sea ?? state.sea,
@@ -499,6 +531,7 @@ async function beginFish(
   x = 550,
   y = 330,
   runSea = expeditionRun?.sea ?? state.sea,
+  trail = false,
 ) {
   if (busy || $('modal').hasAttribute('open')) return;
   const token = ++fightToken;
@@ -517,7 +550,7 @@ async function beginFish(
   if (shiny || f.rank >= 5) sound(980);
   fightShell(
     (shiny ? '✧ 황금 변종 · ' : f.rank >= 5 ? '★ 희귀 입질 · ' : '') + f.name,
-    `${ranks[f.rank]} · ${rounds} 라운드`,
+    `${trail ? '표본 추적 · ' : ''}${ranks[f.rank]} · ${rounds} 라운드`,
     first ? '물고기를 따라 포획 게이지를 채우세요.' : assisted ? '연속 실패 도움 적용' : '',
   );
   $('escape').onclick = () => {
@@ -579,7 +612,7 @@ async function beginFish(
               tension: '안전 장력을 유지하지 못했어요.',
             } as Record<string, string>
           )[mode],
-          () => void beginFish(id, shiny, x, y),
+          () => void beginFish(id, shiny, x, y, runSea, trail),
         );
       }
       return;
@@ -594,6 +627,7 @@ async function beginFish(
     runBonus = inRun && expeditionRun!.relics.includes('deepPurse') ? Math.round(baseGain * 0.35) : 0,
     fishBonus = state.rodFish >= 0 ? Math.round(baseGain * linkedLevel * 0.04) : 0,
     gain = baseGain + bonus + runBonus + fishBonus;
+  const specimenRecorded = trail && !inRun && completeTrail(state, id);
   state.gold += bonus + runBonus + fishBonus;
   const xp = 10 + f.rank * 9 + f.sea * 4 + (shiny ? 35 : 0),
     level = awardXp(xp);
@@ -610,7 +644,7 @@ async function beginFish(
   ocean.reel(id, shiny, x, y, animate);
   if (animate) ocean.popup(gain, combo);
   toast(
-    `${shiny ? '✧ 황금 변종! ' : ''}${f.name} ${cm} cm · 자동 판매 ${baseGain} G${gain > baseGain ? ` · 추가 ${gain - baseGain} G` : ''}${fishBonus ? ` (미페 +${fishBonus})` : ``} · +${xp} XP${level.levels ? ` · 선장 Lv.${state.captainLevel}! +${level.bonus} G` : ''}${inRun ? ' · 원정 항로 진척' : ''}${!inRun && state.survey[f.sea] === seas[f.sea].target && bossReady(state) ? ' · 보스 도전 해금!' : ''}`,
+    `${specimenRecorded ? '관찰 표본 기록! · ' : ''}${shiny ? '✧ 황금 변종! ' : ''}${f.name} ${cm} cm · 자동 판매 ${baseGain} G${gain > baseGain ? ` · 추가 ${gain - baseGain} G` : ''}${fishBonus ? ` (미페 +${fishBonus})` : ``} · +${xp} XP${level.levels ? ` · 선장 Lv.${state.captainLevel}! +${level.bonus} G` : ''}${inRun ? ' · 원정 항로 진척' : ''}${!inRun && state.survey[f.sea] === seas[f.sea].target && bossReady(state) ? ' · 보스 도전 해금!' : ''}`,
   );
   if (animate && (shiny || f.rank >= 5)) ocean.sparkle();
   sound(shiny || f.rank >= 5 ? 990 : 740);
@@ -1285,6 +1319,10 @@ $('cast').onclick = () => {
   const f = ocean.swimmers[Math.floor(Math.random() * ocean.swimmers.length)];
   if (f) void beginFish(f.id, f.shiny, f.sprite.x, f.sprite.y);
 };
+$('trail-cast').onclick = () => {
+  if (busy || expeditionRun || !canFollowTrail(state)) return;
+  void beginFish(seas[state.sea].trailId, false, 550, 330, state.sea, true);
+};
 $('net').onclick = () => {
   if (busy || expeditionRun || Date.now() < state.netReady) return;
   setBusy(true);
@@ -1945,6 +1983,11 @@ function openBook() {
             variant.style.height = '40px';
             detail.append(variant);
           }
+        }
+        if (state.trailCompleted[f.sea] && f.id === seas[f.sea].trailId) {
+          const stamp = document.createElement('small');
+          stamp.textContent = '✓ 해역 관찰 표본';
+          detail.append(stamp);
         }
         card.append(detail);
         $('book-grid').append(card);
