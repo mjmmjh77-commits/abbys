@@ -2,10 +2,11 @@ import Phaser from 'phaser';
 import {fishArt,boatArt} from './art';
 import {bossArt} from './effects';
 import {species,seas,pickFish} from './model';
+import {goldenChance} from './catalog';
 type Swimmer={sprite:Phaser.GameObjects.Image;id:number;shiny:boolean;speed:number;baseY:number;phase:number;};
 export class Ocean extends Phaser.Scene {
  onReady:()=>void=()=>{};
- sea=0; locked=false; swimmers:Swimmer[]=[];
+ layer: "deep"|"shallow"="shallow"; sea=0; locked=false; swimmers:Swimmer[]=[];
  onFish:(id:number,shiny:boolean,x:number,y:number)=>void=()=>{};
  bg!:Phaser.GameObjects.Graphics; decor!:Phaser.GameObjects.Graphics; line!:Phaser.GameObjects.Graphics;
  boat!:Phaser.GameObjects.Image; rod!:Phaser.GameObjects.Graphics;
@@ -21,7 +22,7 @@ export class Ocean extends Phaser.Scene {
    this.textures.addCanvas('boat'+level,art);
   }
   for(const f of species){this.textures.addCanvas('f'+f.id,fishArt(f.shape,f.hue));this.textures.addCanvas('s'+f.id,fishArt(f.shape,f.hue,true));}
-  for(let i=0;i<5;i++)this.textures.addCanvas('boss'+i,bossArt(i));
+  for(let i=0;i<seas.length;i++)this.textures.addCanvas('boss'+i,bossArt(i));
   this.boat=this.add.image(405,120,'boat0').setScale(1.5).setDepth(10);this.rod=this.add.graphics().setDepth(11);
   this.bubbles=Array.from({length:45},(_,i)=>({x:(i*137)%960,y:(i*91)%600,r:1+i%3,s:6+i%7}));
   this.setSea(this.sea);this.game.canvas.style.cursor='default';this.onReady();
@@ -58,10 +59,11 @@ export class Ocean extends Phaser.Scene {
   for(let i=0;i<24;i++){const x=(i*157)%960,y=550+(i*23)%31;g.fillStyle([0x3e8b80,0x527c80,0x485d88,0x8c686c,0x48649b][sea],.8);g.fillRect(x,y-13,5,31);g.fillRect(x-8,y-23,4,21);g.fillRect(x+8,y-32,5,31);g.fillRect(x-8,y-4,20,4);if(i%3===0){g.fillStyle(sea<2?0xc78f88:0x84c2cc,.65);g.fillRect(x+17,y+3,14,5);g.fillRect(x+21,y-4,5,16);}}
   if(sea===3){for(let i=0;i<4;i++){const x=115+i*220;g.fillStyle(0x382f3c);g.fillRect(x,443-i%2*25,30,130);g.fillStyle(0x694d53);g.fillRect(x-7,441-i%2*25,44,9);g.fillStyle(0xe2a16b,.6);g.fillRect(x+3,444-i%2*25,24,3);}}
   if(sea===4){polygon([[330,600],[360,489],[390,489],[418,600]],0x142039);polygon([[610,600],[640,473],[677,473],[708,600]],0x142039);g.fillStyle(0xa2b6ff,.12);g.fillCircle(490,490,55);g.fillStyle(0x9fd9e4,.8);g.fillRect(484,486,9,9);}
+  if(this.layer==="deep"){g.fillStyle(0x061633,.32);g.fillRect(0,135,960,465);}
   this.boat.setTint(sea>1?0xa8c1ce:0xffffff);
  }
  spawn(x?:number,y?:number){
-  const id=pickFish(this.sea),shiny=Math.random()<.025,f=species[id];
+  const id=pickFish(this.sea,this.layer),shiny=Math.random()<goldenChance,f=species[id];
   const sprite=this.add.image(x??Phaser.Math.Between(60,890),y??Phaser.Math.Between(215,510),(shiny?'s':'f')+id).setScale(.9+f.rank*.12).setInteractive();
   const swimmer={sprite,id,shiny,speed:(Math.random()<.5?-1:1)*(12+Math.random()*18)*(this.sea===1?1.3:1),baseY:sprite.y,phase:Math.random()*7};sprite.setFlipX(swimmer.speed<0);
   sprite.on('pointerdown',()=>{if(!this.locked)this.onFish(id,shiny,sprite.x,sprite.y);});this.swimmers.push(swimmer);
