@@ -606,15 +606,16 @@ async function beginFish(
   save();
   resetFight();
   setBusy(true);
-  ocean.reel(id, shiny, x, y);
-  ocean.popup(gain, combo);
+  const animate = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  ocean.reel(id, shiny, x, y, animate);
+  if (animate) ocean.popup(gain, combo);
   toast(
     `${shiny ? '✧ 황금 변종! ' : ''}${f.name} ${cm} cm · 자동 판매 ${baseGain} G${gain > baseGain ? ` · 추가 ${gain - baseGain} G` : ''}${fishBonus ? ` (미페 +${fishBonus})` : ``} · +${xp} XP${level.levels ? ` · 선장 Lv.${state.captainLevel}! +${level.bonus} G` : ''}${inRun ? ' · 원정 항로 진척' : ''}${!inRun && state.survey[f.sea] === seas[f.sea].target && bossReady(state) ? ' · 보스 도전 해금!' : ''}`,
   );
-  if (shiny || f.rank >= 5) ocean.sparkle();
+  if (animate && (shiny || f.rank >= 5)) ocean.sparkle();
   sound(shiny || f.rank >= 5 ? 990 : 740);
   refresh();
-  await pause(900);
+  if (animate) await pause(900);
   if (token !== fightToken) return;
   setBusy(false);
   if (inRun) queueRunBoard(250);

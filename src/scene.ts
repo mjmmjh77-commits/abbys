@@ -81,8 +81,9 @@ export class Ocean extends Phaser.Scene {
   const hook=this.add.text(490,120,'⌁',{fontSize:'22px',color:'#eadbb5'}).setDepth(21).setData('temporary',true),p={x:490,y:120};
   this.tweens.add({targets:p,x,y,duration:500,ease:'Cubic.easeOut',onUpdate:()=>{hook.setPosition(p.x,p.y);this.line.clear().lineStyle(1,0xe5dab1,.8).lineBetween(500,115,p.x,p.y);},onComplete:()=>{hook.destroy();this.line.clear();}});
  }
- reel(id:number,shiny:boolean,x:number,y:number){
+ reel(id:number,shiny:boolean,x:number,y:number,animate=true){
   const f=this.swimmers.find(f=>f.id===id&&f.shiny===shiny);if(f){x=f.sprite.x;y=f.sprite.y;f.sprite.destroy();this.swimmers=this.swimmers.filter(a=>a!==f);this.spawn();}
+  if(!animate)return;
   const fish=this.add.image(x,y,(shiny?'s':'f')+id).setDepth(21).setData('temporary',true),p={x,y};
   this.tweens.add({targets:p,x:448,y:105,duration:850,ease:'Cubic.easeIn',onUpdate:()=>{fish.setPosition(p.x,p.y).setAngle(-30);this.line.clear().lineStyle(1,0xe4d5a5,.8).lineBetween(500,115,p.x,p.y);},onComplete:()=>{fish.destroy();this.line.clear();this.sparkle();}});
  }
