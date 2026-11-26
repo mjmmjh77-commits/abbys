@@ -14,7 +14,23 @@ try {
   await page.goto(process.env.ABYSS_URL ?? 'http://127.0.0.1:5173', { waitUntil: 'domcontentloaded' });
   await page.locator('#game canvas').waitFor();
   const canvas = await page.locator('#game canvas').boundingBox();
-  await page.mouse.click(canvas.x + (65 * canvas.width) / 960, canvas.y + (235 * canvas.height) / 600);
+  // Follow the hover label while the clownfish patrols the shallow shelf.
+  await page.locator('#cast-aim:enabled').waitFor();
+  let found = false;
+  for (const x of [263, 250, 276, 240, 286]) {
+    await page.mouse.move(canvas.x + x * canvas.width / 960, canvas.y + 252 * canvas.height / 600);
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    if ((await page.locator('.scene-hint').innerText()).includes('흰동가리')) {
+      found = true;
+      break;
+    }
+  }
+  assert.ok(found, '여울에서 헤엄치는 흰동가리의 이름표');
+  await page.mouse.down();
+  await page.mouse.up();
+  assert.ok(await page.locator('#bait-cancel').isHidden());
+  await page.locator('.fight-card h2').waitFor({ timeout: 700 });
+  assert.match(await page.locator('.fight-card h2').innerText(), /흰동가리/);
   await page.locator('#escape').click();
   assert.equal((await read()).gold, 100);
   console.log('PASS 바다 물고기 직접 클릭과 취소');

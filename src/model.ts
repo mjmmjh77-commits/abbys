@@ -1,7 +1,7 @@
 export const LEGACY_KEY = 'abyss-fishing-v1';
 export const KEY = 'abyss-fishing-v2';
-import { species, seas, catchWeights, type Layer } from './catalog.ts';
-export { species, seas, type Layer } from './catalog.ts';
+import { species, seas, catchWeights, CORAL_CAST, coralBaitPools, type Layer } from './catalog.ts';
+export { species, seas, CORAL_CAST, type Layer } from './catalog.ts';
 export const ranks = ['일반', '고급', '희귀', '특급', '영웅', '전설', '신화', '고대', '초월', '심연'];
 export const colors = [
   '#a7cec6',
@@ -22,6 +22,7 @@ export interface Save {
   reel: boolean[];
   unlocked: boolean[];
   survey: number[];
+  coralSurveyBonus: number;
   deepCaught: number[];
   trailCompleted: boolean[];
   maxCm: number[];
@@ -65,6 +66,7 @@ export const fresh = (): Save => ({
   reel: seas.map(() => false),
   unlocked: seas.map((_, i) => i === 0),
   survey: seas.map(() => 0),
+  coralSurveyBonus: 0,
   deepCaught: seas.map(() => 0),
   trailCompleted: seas.map(() => false),
   maxCm: species.map(() => 0),
@@ -116,6 +118,7 @@ export function parseSave(text: string | null): Save {
     'reel',
     'unlocked',
     'survey',
+    'coralSurveyBonus',
     'deepCaught',
     'trailCompleted',
     'maxCm',
@@ -128,7 +131,7 @@ export function parseSave(text: string | null): Save {
   for (const [key, initial] of Object.entries(base)) {
     if (key === 'version' || (legacy && extra.includes(key))) continue;
     const value = x[key];
-    if (key === 'trailCompleted' && value === undefined) continue;
+    if ((key === 'trailCompleted' || key === 'coralSurveyBonus') && value === undefined) continue;
     if (
       value === undefined &&
       legacy &&
@@ -180,6 +183,7 @@ export function parseSave(text: string | null): Save {
   } else if (
     !base.unlocked[0] ||
     !base.unlocked[base.sea] ||
+    base.coralSurveyBonus > 2 * base.survey[0] ||
     (base.layer === 'deep' && !base.line[base.sea]) ||
     base.deepCaught.some((n, i) => n > base.survey[i] || (n > 0 && !base.line[i])) ||
     base.tradable.some((n, i) => n > fishCards(base, i))
@@ -400,14 +404,19 @@ export function canFish(s: Save, layer: Layer, depth: number) {
     : depth >= sea.start && depth <= sea.boundary;
 }
 export const TRAIL_REQUIRED_CATCHES = 3;
-export function canFollowTrail(s: Save): boolean {
+export function coralTrailVisible(s: Save): boolean {
+  return s.sea === 0 && hasTrail(s);
+}
+function hasTrail(s: Save): boolean {
   return (
-    s.layer === 'deep' &&
     s.unlocked[s.sea] &&
     s.line[s.sea] &&
     s.deepCaught[s.sea] >= TRAIL_REQUIRED_CATCHES &&
     !s.trailCompleted[s.sea]
   );
+}
+export function canFollowTrail(s: Save): boolean {
+  return s.layer === 'deep' && hasTrail(s);
 }
 
 /** Called only after a successful trail encounter has been settled as a manual catch. */
@@ -417,8 +426,12 @@ export function completeTrail(s: Save, id: number): boolean {
   return true;
 }
 
+// Existing saves already contain one survey unit per manual catch. Only store
+// the additional points earned by multi-round coral fish since this update.
+export const bossProgress = (s: Save, sea = s.sea) =>
+  s.survey[sea] + (sea === 0 ? s.coralSurveyBonus : 0);
 export const bossReady = (s: Save) =>
-  s.bosses[s.sea] || (s.survey[s.sea] >= seas[s.sea].target && s.deepCaught[s.sea] > 0);
+  s.bosses[s.sea] || (bossProgress(s) >= seas[s.sea].target && s.deepCaught[s.sea] > 0);
 export function salePrice(id: number, cm: number, shiny = false) {
   const f = species[id],
     ratio = Math.max(0, Math.min(1, (cm - f.minCm) / (f.maxCm - f.minCm)));
@@ -454,12 +467,15 @@ export function settleCatch(
   if (f.rank >= 2) s.questRare++;
   if (isNew) s.questNew++;
   if (!s.questKinds.includes(id)) s.questKinds.push(id);
+  let surveyGain = 0;
   if (source === 'manual') {
+    surveyGain = f.sea === 0 ? baseRounds(f.rank) : 1;
     s.survey[f.sea]++;
+    if (f.sea === 0) s.coralSurveyBonus += surveyGain - 1;
     if (s.layer === 'deep') s.deepCaught[f.sea]++;
     s.misses = 0;
   }
-  return { gain, cm };
+  return { gain, cm, surveyGain };
 }
 export function defeatBoss(s: Save) {
   if (!bossReady(s)) return 0;
@@ -481,6 +497,9 @@ export function claimResearch(s: Save): number {
 }
 export function pickFish(sea: number, layer: Layer = 'shallow', rng = Math.random, commonOnly = false) {
   const pool = seas[sea][layer].filter((id) => !commonOnly || species[id].rank < 2);
+  return pickFromPool(pool, rng);
+}
+function pickFromPool(pool: number[], rng: () => number) {
   const weights = pool.map((id) => catchWeights[species[id].rank]);
   let roll = rng() * weights.reduce((a, b) => a + b, 0);
   for (const [i, w] of weights.entries()) {
@@ -489,9 +508,66 @@ export function pickFish(sea: number, layer: Layer = 'shallow', rng = Math.rando
   }
   return pool[pool.length - 1];
 }
+
+export type CastPoint = { x: number; y: number };
+export interface CoralCast {
+  aim: CastPoint;
+  landing: CastPoint;
+  range: 100 | 200;
+  distance: number;
+  clipped: boolean;
+  habitat: keyof typeof coralBaitPools;
+  layer: Layer;
+  candidates: number[];
+}
+export const coralCastRange = (upgraded: boolean) =>
+  upgraded ? CORAL_CAST.depth.end : CORAL_CAST.depth.boundary;
+const ellipseDistance = (point: CastPoint, center: CastPoint, radius: CastPoint) =>
+  Math.hypot((point.x - center.x) / radius.x, (point.y - center.y) / radius.y);
+
+export function planCoralCast(point: CastPoint, upgraded: boolean, trailReady: boolean): CoralCast {
+  const { origin, pixelsPerMeter, waterline, shoal, shoalRadius, kelp, kelpRadius, trail, trailRadius } =
+    CORAL_CAST;
+  const aim = {
+    x: Math.min(960, Math.max(0, point.x)),
+    y: Math.min(599, Math.max(waterline, point.y)),
+  };
+  const dx = aim.x - origin.x;
+  const dy = aim.y - origin.y;
+  const distance = Math.hypot(dx, dy);
+  const range = coralCastRange(upgraded);
+  const radius = range * pixelsPerMeter;
+  const clipped = distance > radius;
+  let landing = aim;
+  if (clipped) {
+    // At a low angle, follow the waterline to the last point the line can reach.
+    const offsetY = Math.max(waterline - origin.y, dy * radius / distance);
+    landing = {
+      x: origin.x + Math.sign(dx) * Math.sqrt(Math.max(0, radius ** 2 - offsetY ** 2)),
+      y: origin.y + offsetY,
+    };
+  }
+  const kelpDistance = ellipseDistance(landing, kelp, kelpRadius);
+  const inKelp = upgraded && kelpDistance <= 1;
+  const atTrail = inKelp && trailReady &&
+    Math.hypot(landing.x - trail.x, landing.y - trail.y) <= trailRadius;
+  const habitat = atTrail ? 'trail' : inKelp ? 'kelp' : kelpDistance <= 1.35 ? 'edge' : 'shoal';
+  // In open shallow water, common foragers can always reach a stray bait.
+  const landingMeters = Math.min(distance / pixelsPerMeter, range);
+  const shoalInterior = landingMeters < 95 && ellipseDistance(landing, shoal, shoalRadius) <= 1;
+  const pool = habitat === 'shoal' && !shoalInterior ? 'edge' : habitat;
+  return {
+    aim, landing, range, distance: landingMeters, clipped, habitat,
+    layer: inKelp ? 'deep' : 'shallow',
+    candidates: coralBaitPools[pool],
+  };
+}
+export const pickCoralFish = (cast: CoralCast, rng = Math.random) => pickFromPool(cast.candidates, rng);
+
+const baseRounds = (rank: number) => rank >= 9 ? 3 : rank >= 4 ? 2 : 1;
 export function fishingRules(rank: number, sea: number, rod: number) {
   return {
-    rounds: rank >= 9 ? 3 : rank >= 4 ? 2 : 1,
+    rounds: baseRounds(rank),
     zone: Math.max(
       0.12,
       Math.min(0.58, 0.39 + rod * 0.023 - rank * 0.024 + (sea === 0 ? 0.025 : 0) - sea * 0.004),

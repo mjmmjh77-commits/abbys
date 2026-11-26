@@ -13,6 +13,12 @@ import {
   parseSave,
   buyGear,
   bossReady,
+  bossProgress,
+  CORAL_CAST,
+  coralTrailVisible,
+  type CoralCast,
+  type CastPoint,
+  type Layer,
   TRAIL_REQUIRED_CATCHES,
   canFollowTrail,
   completeTrail,
@@ -78,6 +84,22 @@ document.querySelector('.ocean-card')!.insertAdjacentHTML('afterend', `
       <p id="trail-clue"></p><span id="trail-progress"></span></div>
     <button id="trail-cast" type="button">흔적 따라 낚기</button>
   </section>`);
+document.querySelector('.below-ocean')!.insertAdjacentHTML('beforebegin', `
+  <div id="cast-chart" hidden>
+    <div class="cast-points" role="group" aria-label="미끼를 던질 곳">
+      <button id="aim-shoal" type="button">얕은 여울</button>
+      <button id="aim-kelp" type="button">깊은 해초밭</button>
+      <button id="aim-trail" type="button" hidden>말린 꼬리의 흔적</button>
+    </div>
+    <output id="cast-readout" aria-live="off"></output>
+  </div>`);
+$('cast').insertAdjacentHTML('beforebegin', '<button class="cast-btn" id="cast-aim" type="button" hidden>겨눈 곳에 던지기</button>');
+$('net').insertAdjacentHTML('beforebegin', '<button id="bait-cancel" type="button" hidden>미끼 회수</button>');
+const castHelp = document.querySelector<HTMLElement>('.below-ocean p')!;
+const sceneHint = document.querySelector<HTMLElement>('.scene-hint')!;
+const quickDepth = $('shallow').parentElement!;
+quickDepth.setAttribute('role', 'group');
+quickDepth.insertAdjacentHTML('afterbegin', '<span id="quick-depth-label" hidden>바로 낚기 수심</span>');
 const missionPanel = document.querySelector('.sidebar .panel')!;
 missionPanel.classList.add('exploration-panel');
 document.querySelector('.stats')!.after(missionPanel);
@@ -118,6 +140,15 @@ let busy = false,
   frame = 0,
   activeCleanup: (() => void) | null = null;
 let recent: number[] = [];
+let currentAim: CoralCast | null = null;
+let lastBaitAim: CastPoint | null = null;
+let pendingBait: CoralCast | null = null;
+const coralFishing = () => state.sea === 0 && !expeditionRun;
+const habitatNames: Record<CoralCast['habitat'], string> = {
+  shoal: '얕은 여울', edge: '해초밭 가장자리', kelp: '해초밭 안쪽', trail: '말린 꼬리의 흔적',
+};
+const pointNames = ['shoal', 'kelp', 'trail'] as const;
+const game = $('game');
 const seaAudio = new SeaAudio();
 let combo = 0,
   lastCatch = 0;
@@ -216,7 +247,7 @@ function refreshTrail() {
   panel.hidden = !!expeditionRun;
   if (expeditionRun) return;
   const sea = seas[state.sea], fish = species[sea.trailId];
-  const complete = state.trailCompleted[state.sea], ready = canFollowTrail(state);
+  const complete = state.trailCompleted[state.sea], ready = state.sea === 0 ? coralTrailVisible(state) : canFollowTrail(state);
   panel.dataset.state = complete ? 'complete' : ready ? 'ready' : state.line[state.sea] ? 'search' : 'locked';
   const portrait = $<HTMLCanvasElement>('trail-art'), ctx = portrait.getContext('2d')!;
   ctx.clearRect(0, 0, portrait.width, portrait.height);
@@ -226,11 +257,48 @@ function refreshTrail() {
   $('trail-progress').textContent = complete
     ? `도감에 기록 · 해역 표본 ${state.trailCompleted.filter(Boolean).length}/${seas.length}`
     : !state.line[state.sea] ? `낚싯줄 ${fmt(sea.end)} m 강화 후 조사 가능`
-    : state.layer !== 'deep' ? '깊은 층을 선택해 흔적을 조사하세요.'
+    : state.sea === 0 && ready ? '해초가 흔들린 곳을 겨누세요 · 말린 꼬리의 흔적 발견!'
+    : state.sea !== 0 && state.layer !== 'deep' ? '깊은 층을 선택해 흔적을 조사하세요.'
     : `깊은 층 수동 포획 ${Math.min(TRAIL_REQUIRED_CATCHES, state.deepCaught[state.sea])}/${TRAIL_REQUIRED_CATCHES} · ${ready ? '흔적 발견!' : '어종을 조사하는 중'}`;
   const button = $<HTMLButtonElement>('trail-cast');
   button.disabled = busy || !ready;
   button.textContent = complete ? '관찰 완료' : '흔적 따라 낚기';
+}
+function showAim(plan: CoralCast) {
+  currentAim = plan;
+  const readout = pendingBait ?? plan;
+  $('cast-readout').textContent = pendingBait
+    ? `입질 기다리는 중 · ${habitatNames[readout.habitat]}`
+    : `${readout.range} m 줄 · 예상 착수 ${Math.round(readout.distance)} m · ${habitatNames[readout.habitat]}${readout.clipped ? ' (줄 끝)' : ''}`;
+  for (const name of pointNames) {
+    const point = CORAL_CAST[name];
+    $('aim-' + name).setAttribute('aria-pressed', String(plan.aim.x === point.x && plan.aim.y === point.y));
+  }
+}
+function refreshCast() {
+  const coral = coralFishing();
+  const trace = coral && coralTrailVisible(state);
+  document.querySelector<HTMLElement>('.depth-scale')!.hidden = coral;
+  document.querySelector('.ocean-head .live')!.textContent = coral ? '미끼를 던지는 바다' : 'LIVE EXPEDITION';
+  $('quick-depth-label').hidden = !coral;
+  quickDepth.setAttribute('aria-label', coral ? '바로 낚기 수심' : '탐사할 수심');
+  $('cast-chart').hidden = !coral;
+  $('cast-aim').hidden = !coral;
+  $('bait-cancel').hidden = !pendingBait;
+  $('net').hidden = !!pendingBait;
+  $('aim-trail').hidden = !trace;
+  for (const name of pointNames) $<HTMLButtonElement>('aim-' + name).disabled = busy;
+  $<HTMLButtonElement>('cast-aim').disabled = busy || !ocean.bg;
+  $('cast').textContent = coral ? '바로 낚기' : '⌁ 낚싯줄 던지기';
+  castHelp.textContent = coral ? '← → 포인트 선택 · Enter 던지기 · Space 바로 낚기' : '클릭 / 터치로 낚시 · SPACE로 시작';
+  game.tabIndex = coral ? 0 : -1;
+  game.setAttribute('aria-label', coral ? '햇살 산호해 낚시 지도. 방향키로 포인트 선택, Enter로 던지기' : '물고기를 클릭해 낚시하는 바다');
+  ocean.setCoralState(coral, state.line[0], trace);
+  if (coral && currentAim) showAim(currentAim);
+  sceneHint.textContent = pendingBait ? '미끼를 보고 물고기가 다가옵니다…'
+    : trace ? '해초 사이로 말린 꼬리가 보입니다. 흔적에 미끼를 던져 보세요.'
+    : coral ? '바다를 겨눠 미끼 던지기 · 물고기를 누르면 바로 낚기'
+    : '물고기를 클릭하거나 아래 버튼으로 낚시를 시작하세요';
 }
 function refresh() {
   refreshTrail();
@@ -238,7 +306,8 @@ function refresh() {
   if (questReset) save();
   const runSea = expeditionRun?.sea ?? state.sea,
     sea = seas[runSea],
-    n = expeditionRun ? expeditionRun.node : state.survey[state.sea];
+    n = expeditionRun ? expeditionRun.node : bossProgress(state),
+    surveyUnit = runSea === 0 ? '조사점' : '마리';
   $('gold').textContent = fmt(state.gold);
   $('total').textContent = fmt(state.counts.reduce((a, b) => a + b, 0));
   $('discovered').textContent = String(state.counts.filter((n) => n > 0).length);
@@ -270,7 +339,8 @@ function refresh() {
     top = shallow ? sea.start : sea.boundary,
     bottom = shallow ? sea.boundary : sea.end;
   $('sea-depth').textContent =
-    (shallow ? '얕은 층' : '깊은 층') + ' · ' + fmt(top) + ' — ' + fmt(bottom) + ' m';
+    coralFishing() ? `개방 수심 · 0 — ${state.line[0] ? sea.end : sea.boundary} m`
+    : (shallow ? '얕은 층' : '깊은 층') + ' · ' + fmt(top) + ' — ' + fmt(bottom) + ' m';
   document.querySelector('.depth-scale')!.innerHTML = (
     top +
     ' m ─|──|' +
@@ -288,7 +358,7 @@ function refresh() {
   $('perk').textContent = sea.perk;
   $('boss-progress').textContent = expeditionRun
     ? `${Math.min(n, 2)} / 2`
-    : `${Math.min(n, sea.target)} / ${sea.target}`;
+    : `${Math.min(n, sea.target)} / ${sea.target} ${surveyUnit}`;
   $('boss-bar').style.width =
     `${expeditionRun ? Math.min(100, n * 50) : Math.min(100, (n * 100) / sea.target)}%`;
   $('boss').textContent = expeditionRun
@@ -296,7 +366,7 @@ function refresh() {
       ? `원정 경로 ${2 - n}개 더 진행하면 보스전`
       : '원정 보스와 결전'
     : !bossReady(state)
-      ? `보스 준비 · 조사 ${Math.min(n, sea.target)}/${sea.target} · 깊은 층 ${Math.min(1, state.deepCaught[state.sea])}/1`
+      ? `보스 준비 · ${Math.min(n, sea.target)}/${sea.target} ${surveyUnit} · 깊은 층 ${Math.min(1, state.deepCaught[state.sea])}/1마리`
       : state.bosses[state.sea]
         ? 'BOSS · 재도전하기 ↗'
         : 'BOSS · ' + sea.boss + ' 도전 ↗';
@@ -347,6 +417,7 @@ function refresh() {
   ($('cast') as HTMLButtonElement).disabled = busy || !!expeditionRun;
   ($('net') as HTMLButtonElement).disabled = busy || !!expeditionRun || Date.now() < state.netReady;
   ocean.locked = busy || !!expeditionRun;
+  refreshCast();
   ocean.setBoss(!expeditionRun && bossReady(state), state.bosses[state.sea]);
   ocean.setEquipment(state.rod, state.boat);
   $('boss').classList.toggle('cleared', !expeditionRun && state.bosses[state.sea]);
@@ -382,7 +453,9 @@ function refresh() {
     deep = state.layer === 'deep',
     locked = busy || !!expeditionRun;
   let goal: string;
-  if (state.bosses[state.sea]) {
+  if (coralFishing() && coralTrailVisible(state)) {
+    goal = '말린 꼬리의 흔적 조사';
+  } else if (state.bosses[state.sea]) {
     goal =
       state.sea === seas.length - 1
         ? '마지막 보스 격파 · 심해 원정 도전'
@@ -391,11 +464,12 @@ function refresh() {
     goal =
       state.gold < area.lineCost
         ? `낚싯줄 강화까지 ${area.lineCost - state.gold} G`
-        : '장비 공방에서 낚싯줄 강화';
+        : (state.sea === 0 ? '200 m 낚싯줄 구매 · 120 G' : '장비 공방에서 낚싯줄 강화');
   } else if (!state.deepCaught[state.sea]) {
-    goal = deep ? '깊은 층에서 첫 물고기 낚기' : '깊은 층 선택 후 첫 물고기 낚기';
+    goal = state.sea === 0 ? '해초밭 안쪽에서 1마리 낚기' : deep ? '깊은 층에서 첫 물고기 낚기' : '깊은 층 선택 후 첫 물고기 낚기';
   } else {
-    goal = n < area.target ? `보스까지 수동 낚시 ${area.target - n}마리` : `${area.boss}에게 도전`;
+    goal = n >= area.target ? `${area.boss}에게 도전` : state.sea === 0
+      ? `보스까지 ${area.target - n} 조사점` : `보스까지 수동 낚시 ${area.target - n}마리`;
   }
   $('goal').textContent = expeditionRun ? '원정 항로 진행 중' : '다음 목표 · ' + goal;
   for (const layer of ['shallow', 'deep'] as const) {
@@ -408,6 +482,7 @@ function refresh() {
       ' m';
     button.disabled = locked || (isDeep && !state.line[state.sea]);
     button.setAttribute('aria-pressed', String(state.layer === layer));
+    button.title = coralFishing() ? '바로 낚기에 사용할 수심' : '이 수심으로 이동';
   }
   const reach = state.line[state.sea] ? area.end : area.boundary;
   $('line').textContent = state.line[state.sea]
@@ -471,6 +546,11 @@ $('goal').onclick = () => {
     $('line').focus();
     return;
   }
+  if (coralFishing() && coralTrailVisible(state)) {
+    $('aim-trail').click();
+    $('cast-aim').focus();
+    return;
+  }
   if (state.bosses[state.sea]) {
     (state.sea === seas.length - 1
       ? $('expedition')
@@ -480,11 +560,17 @@ $('goal').onclick = () => {
     ).click();
     return;
   }
+  if (coralFishing() && state.line[0] && !state.deepCaught[0]) {
+    $('aim-kelp').click();
+    $('cast-aim').focus();
+    return;
+  }
   if (state.line[state.sea] && !state.deepCaught[state.sea] && state.layer === 'shallow') {
     $('deep').click();
     return;
   }
-  (bossReady(state) ? $('boss') : $('cast')).click();
+  if (coralFishing() && !bossReady(state)) ocean.castAim();
+  else (bossReady(state) ? $('boss') : $('cast')).click();
 };
 for (const layer of ['shallow', 'deep'] as const)
   $(layer).onclick = () => {
@@ -492,7 +578,8 @@ for (const layer of ['shallow', 'deep'] as const)
       return;
     state.layer = layer;
     ocean.layer = layer;
-    ocean.setSea(state.sea);
+    if (coralFishing()) ocean.aimAt(layer === 'deep' ? CORAL_CAST.kelp : CORAL_CAST.shoal);
+    else ocean.setSea(state.sea);
     save();
     refresh();
   };
@@ -501,10 +588,18 @@ for (const kind of ['line', 'reel'] as const)
     if (busy || expeditionRun || !buyGear(state, kind)) return;
     save();
     refresh();
+    if (kind === 'line' && coralFishing()) {
+      ocean.aimAt(lastBaitAim ?? CORAL_CAST.kelp);
+      const bounds = game.getBoundingClientRect();
+      if (bounds.bottom < 80 || bounds.top >= innerHeight) {
+        const motion = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth';
+        game.scrollIntoView({ block: 'start', behavior: motion });
+      }
+    }
     sound(700);
     toast(
       kind === 'line'
-        ? '줄 강화 완료! 깊은 층 버튼을 눌러 내려가세요.'
+        ? (coralFishing() ? '200 m 줄을 감았습니다. 이제 해초밭 안쪽까지 닿아요.' : '줄 강화 완료! 깊은 층 버튼을 눌러 내려가세요.')
         : '릴 강화 완료! 홀드와 장력에 여유가 생겼어요.',
     );
   };
@@ -514,16 +609,16 @@ function retry(reason: string, action: () => void, practice?: () => void) {
   $('fight-content').innerHTML =
     '<button class="cast-btn" id="retry">즉시 재도전</button>' +
     (practice ? '<button class="upgrade" id="practice">연습 도움 켜고 도전</button>' : '');
-  $('retry').onclick = () => {
+  const retryToken = ++fightToken;
+  const choose = (next?: () => void) => {
+    if (fightToken !== retryToken) return;
+    fightToken++;
     resetFight();
-    action();
+    next?.();
   };
-  if (practice)
-    $('practice').onclick = () => {
-      resetFight();
-      practice();
-    };
-  $('escape').onclick = resetFight;
+  $('retry').onclick = () => choose(action);
+  if (practice) $('practice').onclick = () => choose(practice);
+  $('escape').onclick = () => choose();
 }
 async function beginFish(
   id: number,
@@ -531,12 +626,16 @@ async function beginFish(
   x = 550,
   y = 330,
   runSea = expeditionRun?.sea ?? state.sea,
-  trail = false,
+  encounter: { trail?: boolean; layer?: Layer; fromBait?: boolean } = {},
 ) {
   if (busy || $('modal').hasAttribute('open')) return;
+  const { trail, layer, fromBait } = encounter;
+  if (trail && !(coralFishing() ? coralTrailVisible(state) : canFollowTrail(state))) return;
+  const layerChanged = layer !== undefined && state.layer !== layer;
+  if (layer) state.layer = ocean.layer = layer;
   const token = ++fightToken;
   setBusy(true);
-  ocean.hook(x, y);
+  if (!fromBait) ocean.hook(x, y);
   const f = species[id],
     rules = fishingRules(f.rank, runSea, state.rod),
     assisted = !expeditionRun && state.misses >= 3,
@@ -546,7 +645,7 @@ async function beginFish(
   const first = !state.guided;
   state.guided = true;
   if (assisted) state.misses = 0;
-  if (first || assisted) save();
+  if (first || assisted || layerChanged) save();
   if (shiny || f.rank >= 5) sound(980);
   fightShell(
     (shiny ? '✧ 황금 변종 · ' : f.rank >= 5 ? '★ 희귀 입질 · ' : '') + f.name,
@@ -612,7 +711,7 @@ async function beginFish(
               tension: '안전 장력을 유지하지 못했어요.',
             } as Record<string, string>
           )[mode],
-          () => void beginFish(id, shiny, x, y, runSea, trail),
+          () => void beginFish(id, shiny, x, y, runSea, encounter),
         );
       }
       return;
@@ -621,7 +720,8 @@ async function beginFish(
   if (token !== fightToken) return;
   combo = Date.now() - lastCatch < 45000 ? combo + 1 : 1;
   lastCatch = Date.now();
-  const { gain: baseGain, cm } = settleCatch(state, id, shiny, expeditionRun ? 'expedition' : 'manual'),
+  const wasReady = bossReady(state);
+  const { gain: baseGain, cm, surveyGain } = settleCatch(state, id, shiny, expeditionRun ? 'expedition' : 'manual'),
     bonus = comboBonus(baseGain, combo),
     inRun = !!expeditionRun && expeditionRun.sea === runSea,
     runBonus = inRun && expeditionRun!.relics.includes('deepPurse') ? Math.round(baseGain * 0.35) : 0,
@@ -644,7 +744,7 @@ async function beginFish(
   ocean.reel(id, shiny, x, y, animate);
   if (animate) ocean.popup(gain, combo);
   toast(
-    `${specimenRecorded ? '관찰 표본 기록! · ' : ''}${shiny ? '✧ 황금 변종! ' : ''}${f.name} ${cm} cm · 자동 판매 ${baseGain} G${gain > baseGain ? ` · 추가 ${gain - baseGain} G` : ''}${fishBonus ? ` (미페 +${fishBonus})` : ``} · +${xp} XP${level.levels ? ` · 선장 Lv.${state.captainLevel}! +${level.bonus} G` : ''}${inRun ? ' · 원정 항로 진척' : ''}${!inRun && state.survey[f.sea] === seas[f.sea].target && bossReady(state) ? ' · 보스 도전 해금!' : ''}`,
+    `${specimenRecorded ? '관찰 표본 기록! · ' : ''}${shiny ? '✧ 황금 변종! ' : ''}${f.name} ${cm} cm · 자동 판매 ${baseGain} G${!inRun && f.sea === 0 ? ` · +${surveyGain} 조사점` : ''}${gain > baseGain ? ` · 추가 ${gain - baseGain} G` : ''}${fishBonus ? ` (미페 +${fishBonus})` : ``} · +${xp} XP${level.levels ? ` · 선장 Lv.${state.captainLevel}! +${level.bonus} G` : ''}${inRun ? ' · 원정 항로 진척' : ''}${!inRun && !wasReady && bossReady(state) ? ' · 보스 도전 해금!' : ''}`,
   );
   if (animate && (shiny || f.rank >= 5)) ocean.sparkle();
   sound(shiny || f.rank >= 5 ? 990 : 740);
@@ -1302,26 +1402,65 @@ async function beginBoss(expedition = false, practice = false) {
   };
   frame = requestAnimationFrame(tick);
 }
-const sceneHint = document.querySelector<HTMLElement>('.scene-hint')!;
 ocean.onFishHover = (id, shiny) => {
-  if (id === null || busy) {
-    sceneHint.textContent = '물고기 위에 마우스를 올려 어종과 난이도 확인';
+  if (busy) return;
+  if (id === null) {
+    sceneHint.textContent = coralFishing() ? (coralTrailVisible(state)
+      ? '해초 사이의 말린 꼬리를 겨눠 보세요.' : '바다를 겨눠 미끼 던지기 · 물고기를 누르면 바로 낚기')
+      : '물고기 위에 마우스를 올려 어종과 난이도 확인';
     return;
   }
   const f = species[id],
     rounds = fishingRules(f.rank, f.sea, state.rod).rounds;
   sceneHint.textContent = `${shiny ? '✧ 황금 · ' : ''}${f.name} · ${ranks[f.rank]} · 기본 ${rounds}라운드 · 클릭해서 낚기`;
 };
-ocean.onFish = (...args) => {
-  if (!expeditionRun) void beginFish(...args);
+ocean.onFish = (id, shiny, x, y, layer) => {
+  if (!expeditionRun) void beginFish(id, shiny, x, y, state.sea, { layer });
 };
+ocean.onAim = showAim;
+ocean.onCast = (plan) => {
+  if (!coralFishing() || busy || modal.open || !ocean.bg) return;
+  const token = ++fightToken;
+  pendingBait = plan;
+  setBusy(true);
+  ocean.playBait(plan, (id, shiny, x, y) => {
+    if (token !== fightToken || !pendingBait) return;
+    lastBaitAim = plan.aim;
+    pendingBait = null;
+    busy = false;
+    void beginFish(id, shiny, x, y, 0, { layer: plan.layer, trail: plan.habitat === 'trail', fromBait: true });
+  });
+};
+function retrieveBait() {
+  if (!pendingBait) return;
+  fightToken++;
+  pendingBait = null;
+  ocean.cancelBait();
+  setBusy(false);
+  toast('미끼를 회수했습니다.');
+}
+$('bait-cancel').onclick = retrieveBait;
+$('cast-aim').onclick = () => { if (!busy && coralFishing()) ocean.castAim(); };
+for (const name of pointNames) {
+  $('aim-' + name).onclick = () => {
+    if (!coralFishing() || busy || (name === 'trail' && !coralTrailVisible(state))) return;
+    ocean.aimAt(CORAL_CAST[name]);
+    game.focus({ preventScroll: true });
+  };
+}
 $('cast').onclick = () => {
-  const f = ocean.swimmers[Math.floor(Math.random() * ocean.swimmers.length)];
+  if (busy || expeditionRun) return;
+  const swimmers = coralFishing() ? ocean.swimmers.filter(f => f.layer === state.layer) : ocean.swimmers;
+  const f = swimmers[Math.floor(Math.random() * swimmers.length)];
   if (f) void beginFish(f.id, f.shiny, f.sprite.x, f.sprite.y);
 };
 $('trail-cast').onclick = () => {
-  if (busy || expeditionRun || !canFollowTrail(state)) return;
-  void beginFish(seas[state.sea].trailId, false, 550, 330, state.sea, true);
+  if (busy || expeditionRun) return;
+  if (coralFishing()) {
+    if (!coralTrailVisible(state)) return;
+    ocean.aimAt(CORAL_CAST.trail);
+    ocean.castAim();
+  } else if (canFollowTrail(state)) void beginFish(seas[state.sea].trailId, false, 550, 330, state.sea, { trail: true });
 };
 $('net').onclick = () => {
   if (busy || expeditionRun || Date.now() < state.netReady) return;
@@ -2017,7 +2156,7 @@ function openHelp() {
   )
     return;
   $('modal-body').innerHTML =
-    `<div class="help-content"><h3>01 / 낚싯줄 던지기</h3>바다의 물고기를 클릭하거나 낚싯줄 던지기 버튼을 누르세요. 표시된 조작으로 1~3라운드를 마치면 물고기의 크기와 판매금이 표시됩니다.<h3>02 / 더 깊은 바다로</h3>장비 공방에서 낚싯줄을 강화한 뒤 깊은 층을 선택하세요. 깊은 층 한 마리를 포함해 해역 조사를 마치고 보스를 이기면 다음 해역으로 출항할 수 있습니다. <h3>03 / 보스의 타이밍</h3>노란 원이 초록색으로 바뀌면 클릭하세요. 파란 원은 표시된 시간 동안 누르세요. 네 번 실수하면 전투가 끝나지만 바로 재도전할 수 있습니다. 첫 처치 보상은 한 번만 지급됩니다.<h3>04 / 발견의 즐거움</h3>그물은 재사용 시간이 있는 스킬입니다. 장비 강화로 포획 수와 사용 빈도가 증가합니다. 각 해역의 서로 다른 어종 5종을 모으면 연구 보상을 받을 수 있습니다. 일반·고급·희귀·특급·영웅·전설·신화·고대·초월·심연 10등급을 수집하세요. 2.5% 확률의 황금 변종은 4배의 골드를 줍니다. 미페 카드는 희생 재료로 최대 +11까지 강화할 수 있습니다.<h3>05 / 내 기록 보관하기</h3>기록은 브라우저마다 따로 저장됩니다. 다른 브라우저로 옮기거나 백업할 때 아래 내보내기를 사용하세요. 가져오기는 현재 기록을 바꾸므로 기존 기록도 먼저 보관해 주세요.</div><div class="settings-actions">${__HAS_SOURCE_ZIP__ ? '<a href="/ABYSS-PC.zip" download>PC 프로젝트 ZIP 다운로드</a>' : ''}<button id="export">기록 내보내기 ↓</button><button id="import">기록 가져오기 ↑</button><input id="save-file" type="file" accept="application/json,.json"></div>`;
+    `<div class="help-content"><h3>01 / 낚싯줄 던지기</h3>햇살 산호해에서는 바다를 겨누면 점선과 예상 착수점이 보입니다. 물 위를 클릭해 미끼를 던지세요. 터치로 겨눈 뒤에는 ‘겨눈 곳에 던지기’를 누르세요. 방향키로 포인트를 고르고 Enter로 던질 수도 있어요. 보이는 물고기를 누르거나 ‘바로 낚기’ 또는 Space로 곧장 낚시할 수 있습니다. 표시된 조작으로 1~3라운드를 마치면 물고기의 크기와 판매금이 표시됩니다.<h3>02 / 더 깊은 바다로</h3>산호해의 200 m 줄은 깊은 해초밭 안쪽까지 닿습니다. 안쪽에서 세 마리를 직접 낚으면 해초 사이에 표본의 흔적이 나타납니다. 산호해 수동 낚시는 기본 라운드마다 1조사점씩 얻습니다. 다른 해역에서는 장비 공방에서 낚싯줄을 강화한 뒤 깊은 층을 선택하세요. 깊은 층 한 마리를 포함해 해역 조사를 마치고 보스를 이기면 다음 해역으로 출항할 수 있습니다. <h3>03 / 보스의 타이밍</h3>노란 원이 초록색으로 바뀌면 클릭하세요. 파란 원은 표시된 시간 동안 누르세요. 네 번 실수하면 전투가 끝나지만 바로 재도전할 수 있습니다. 첫 처치 보상은 한 번만 지급됩니다.<h3>04 / 발견의 즐거움</h3>그물은 재사용 시간이 있는 스킬입니다. 장비 강화로 포획 수와 사용 빈도가 증가합니다. 각 해역의 서로 다른 어종 5종을 모으면 연구 보상을 받을 수 있습니다. 일반·고급·희귀·특급·영웅·전설·신화·고대·초월·심연 10등급을 수집하세요. 2.5% 확률의 황금 변종은 4배의 골드를 줍니다. 미페 카드는 희생 재료로 최대 +11까지 강화할 수 있습니다.<h3>05 / 내 기록 보관하기</h3>기록은 브라우저마다 따로 저장됩니다. 다른 브라우저로 옮기거나 백업할 때 아래 내보내기를 사용하세요. 가져오기는 현재 기록을 바꾸므로 기존 기록도 먼저 보관해 주세요.</div><div class="settings-actions">${__HAS_SOURCE_ZIP__ ? '<a href="/ABYSS-PC.zip" download>PC 프로젝트 ZIP 다운로드</a>' : ''}<button id="export">기록 내보내기 ↓</button><button id="import">기록 가져오기 ↑</button><input id="save-file" type="file" accept="application/json,.json"></div>`;
   $('export').onclick = () => {
     const url = URL.createObjectURL(
       new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }),
@@ -2047,6 +2186,7 @@ function openHelp() {
       state = candidate;
       storageBlocked = false;
       recent = [];
+      lastBaitAim = null;
       combo = 0;
       expeditionRun = null;
       ocean.layer = state.layer;
@@ -2061,6 +2201,30 @@ function openHelp() {
 }
 $('help').onclick = openHelp;
 window.addEventListener('keydown', (e) => {
+  if (modal.open || e.repeat || e.altKey || e.ctrlKey || e.metaKey) return;
+  if (e.key === 'Escape' && pendingBait) {
+    e.preventDefault();
+    retrieveBait();
+    return;
+  }
+  const target = e.target as HTMLElement;
+  const chartKeys = target === document.body || game.contains(target) || !!target.closest('#cast-chart, #cast-aim');
+  if (coralFishing() && !busy && chartKeys) {
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      const points = pointNames.filter(name => name !== 'trail' || coralTrailVisible(state));
+      const index = points.findIndex(name => $('aim-' + name).getAttribute('aria-pressed') === 'true');
+      const next = index < 0 ? (e.key === 'ArrowRight' ? 0 : points.length - 1)
+        : (index + (e.key === 'ArrowRight' ? 1 : -1) + points.length) % points.length;
+      $('aim-' + points[next]).click();
+      return;
+    }
+    if (e.key === 'Enter' && !target.closest('.cast-points')) {
+      e.preventDefault();
+      ocean.castAim();
+      return;
+    }
+  }
   if (
     e.code === 'Space' &&
     !e.repeat &&
@@ -2073,7 +2237,8 @@ window.addEventListener('keydown', (e) => {
   }
 });
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && busy && !$('minigame').hidden) {
+  if (document.hidden && pendingBait) retrieveBait();
+  else if (document.hidden && busy && !$('minigame').hidden) {
     fightToken++;
     resetFight();
     toast('잠시 자리를 비워 낚시를 중단했어요. 다시 도전할 수 있습니다.');
@@ -2097,7 +2262,7 @@ $('ranking').onclick = async () => {
   if (
     !openModal(
       '선장 랭킹',
-      '보스 승리 해역 수, 수동 조사 합계 순으로 정렬합니다. 같은 브라우저의 최고 기록을 보관합니다.',
+      '보스 승리 해역 수, 직접 낚은 마릿수 순으로 정렬합니다. 같은 브라우저의 최고 기록을 보관합니다.',
     )
   )
     return;

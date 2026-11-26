@@ -12,7 +12,8 @@
     "test:browser": "node --experimental-strip-types tests/browser.mjs",
     "test:menus": "node --experimental-strip-types tests/menus.mjs",
     "build:showcase": "tsc --noEmit && vite build --mode showcase",
-    "test:trail": "node --experimental-strip-types tests/trail-browser.mjs"
+    "test:trail": "node --experimental-strip-types tests/trail-browser.mjs",
+    "test:coral": "node --experimental-strip-types tests/coral-browser.mjs"
   },
   "dependencies": {
     "firebase": "^13.4.0",

@@ -1,14 +1,66 @@
 import Phaser from 'phaser';
-import {fishArt,boatArt} from './art';
+import {fishArt, boatArt} from './art';
 import {bossArt} from './effects';
-import {species,seas,pickFish} from './model';
-import {goldenChance} from './catalog';
-type Swimmer={sprite:Phaser.GameObjects.Image;id:number;shiny:boolean;speed:number;baseY:number;phase:number;};
+import {CORAL_CAST, planCoralCast, pickCoralFish, species, seas, pickFish, type CastPoint, type CoralCast} from './model';
+import {goldenChance, type Layer} from './catalog';
+
+type Swimmer = {
+ sprite: Phaser.GameObjects.Image;
+ id: number;
+ shiny: boolean;
+ layer: Layer;
+ speed: number;
+ baseY: number;
+ phase: number;
+ patrol?: {center: number; radius: number};
+};
+type BiteHandler = (id: number, shiny: boolean, x: number, y: number) => void;
+type Bait = {
+ plan: CoralCast;
+ elapsed: number;
+ onBite: BiteHandler;
+ approach?: {
+  fish: Swimmer;
+  from: CastPoint;
+  initialAlpha: number;
+  initialDepth: number;
+  mouthOffset: number;
+  duration: number;
+  visitor: boolean;
+ };
+};
+// Resident schools leave a clear corridor through the centre of each marked fishing spot.
+const shoalSchool = [
+ {id: 0, x: 263, y: 252}, {id: 2, x: 183, y: 292}, {id: 3, x: 425, y: 325},
+ {id: 4, x: 457, y: 217}, {id: 0, x: 616, y: 332}, {id: 1, x: 723, y: 298},
+];
+const kelpSchool = [{id: 5, x: 723, y: 467}, {id: 7, x: 878, y: 487}];
+const waterline = CORAL_CAST.waterline;
+const travelSeconds = .48;
 export class Ocean extends Phaser.Scene {
  onReady:()=>void=()=>{};
  layer: "deep"|"shallow"="shallow"; sea=0; locked=false; swimmers:Swimmer[]=[];
  onFishHover:(id:number|null,shiny?:boolean)=>void=()=>{};
- onFish:(id:number,shiny:boolean,x:number,y:number)=>void=()=>{};
+ onFish:(id:number,shiny:boolean,x:number,y:number,layer?:Layer)=>void=()=>{};
+ onAim:(plan:CoralCast)=>void=()=>{};
+ onCast:(plan:CoralCast)=>void=()=>{};
+ private coralEnabled=false;
+ private upgraded=false;
+ private trailReady=false;
+ private revealSeconds=0;
+ private lastKelpFrame=-1;
+ private aim:CastPoint={...CORAL_CAST.kelp};
+ private preview=planCoralCast(this.aim,false,false);
+ private guide!:Phaser.GameObjects.Graphics;
+ private kelp!:Phaser.GameObjects.Graphics;
+ private shoalLabel!:Phaser.GameObjects.Text;
+ private kelpLabel!:Phaser.GameObjects.Text;
+ private trailLabel!:Phaser.GameObjects.Text;
+ private landingLabel!:Phaser.GameObjects.Text;
+ private shadows:Phaser.GameObjects.Image[]=[];
+ private bait?:Bait;
+ private hooked?:Swimmer;
+ private get coral(){return this.sea===0 && this.coralEnabled;}
  bg!:Phaser.GameObjects.Graphics; decor!:Phaser.GameObjects.Graphics; line!:Phaser.GameObjects.Graphics;
  boat!:Phaser.GameObjects.Image; rod!:Phaser.GameObjects.Graphics;
  bubbles:{x:number;y:number;r:number;s:number}[]=[];
@@ -23,18 +75,36 @@ export class Ocean extends Phaser.Scene {
    this.textures.addCanvas('boat'+level,art);
   }
   for(const f of species){this.textures.addCanvas('f'+f.id,fishArt(f.shape,f.hue));this.textures.addCanvas('s'+f.id,fishArt(f.shape,f.hue,true));}
+  for(const f of kelpSchool){
+   const art=fishArt(species[f.id].shape,species[f.id].hue),ctx=art.getContext('2d')!;
+   ctx.globalCompositeOperation='source-in';ctx.fillStyle='#103e4b';ctx.fillRect(0,0,art.width,art.height);
+   this.textures.addCanvas('shadow'+f.id,art);
+  }
   for(let i=0;i<seas.length;i++)this.textures.addCanvas('boss'+i,bossArt(i));
   this.boat=this.add.image(405,120,'boat0').setScale(1.5).setDepth(10);this.rod=this.add.graphics().setDepth(11);
   this.bubbles=Array.from({length:45},(_,i)=>({x:(i*137)%960,y:(i*91)%600,r:1+i%3,s:6+i%7}));
+  this.guide=this.add.graphics().setDepth(7);
+  this.kelp=this.add.graphics().setDepth(2);
+  this.shoalLabel=this.mapLabel(312,206,'얕은 여울','#e2fff0');
+  this.kelpLabel=this.mapLabel(762,531,'깊은 해초밭','#c2e8ce');
+  this.trailLabel=this.mapLabel(CORAL_CAST.trail.x, CORAL_CAST.trail.y+28,'말린 꼬리 흔적','#ffd2ba');
+  this.landingLabel=this.mapLabel(0,0,'','#ffe4a4').setOrigin(0, 0.5);
+  this.input.on('pointermove',(pointer:Phaser.Input.Pointer,over:Phaser.GameObjects.GameObject[])=>{
+   if(this.coral && !this.locked && !pointer.wasTouch && pointer.y>=waterline && (!over.length || this.pointsAtTrail(pointer)))this.aimAt(pointer);
+  });
+  this.input.on('pointerdown',(pointer:Phaser.Input.Pointer,over:Phaser.GameObjects.GameObject[])=>{
+   if(!this.coral || this.locked || pointer.y<waterline || (over.length && !this.pointsAtTrail(pointer)))return;
+   this.aimAt(pointer);
+   if(!pointer.wasTouch)this.castAim();
+  });
   this.setSea(this.sea);this.game.canvas.style.cursor='default';this.onReady();
  }
  setEquipment(rod:number,boat:number){this.rodLevel=rod;this.boatLevel=boat;if(this.boat)this.boat.setTexture('boat'+boat);}
  setSea(n:number){
-  this.sea=n;this.onFishHover(null);if(!this.bg)return;this.tweens.killAll();this.line.clear();
+  this.cancelBait();this.releaseHook();this.sea=n;this.onFishHover(null);if(!this.bg)return;this.tweens.killAll();this.line.clear();
   this.children.list.filter(c=>c.getData('temporary')).forEach(c=>c.destroy());
-  this.swimmers.forEach(f=>f.sprite.destroy());this.swimmers=[];
   this.boss?.destroy();this.bossLabel?.destroy();this.boss=undefined;this.bossLabel=undefined;
-  this.drawBackground();for(let i=0;i<10;i++)this.spawn(65+i*88,235+(i*61)%260);
+  this.populate();
   this.cameras.main.fadeIn(650,0,4,12);
  }
  drawBackground(){
@@ -60,20 +130,265 @@ export class Ocean extends Phaser.Scene {
   for(let i=0;i<24;i++){const x=(i*157)%960,y=550+(i*23)%31;g.fillStyle([0x3e8b80,0x527c80,0x485d88,0x8c686c,0x48649b][sea],.8);g.fillRect(x,y-13,5,31);g.fillRect(x-8,y-23,4,21);g.fillRect(x+8,y-32,5,31);g.fillRect(x-8,y-4,20,4);if(i%3===0){g.fillStyle(sea<2?0xc78f88:0x84c2cc,.65);g.fillRect(x+17,y+3,14,5);g.fillRect(x+21,y-4,5,16);}}
   if(sea===3){for(let i=0;i<4;i++){const x=115+i*220;g.fillStyle(0x382f3c);g.fillRect(x,443-i%2*25,30,130);g.fillStyle(0x694d53);g.fillRect(x-7,441-i%2*25,44,9);g.fillStyle(0xe2a16b,.6);g.fillRect(x+3,444-i%2*25,24,3);}}
   if(sea===4){polygon([[330,600],[360,489],[390,489],[418,600]],0x142039);polygon([[610,600],[640,473],[677,473],[708,600]],0x142039);g.fillStyle(0xa2b6ff,.12);g.fillCircle(490,490,55);g.fillStyle(0x9fd9e4,.8);g.fillRect(484,486,9,9);}
-  if(this.layer==="deep"){g.fillStyle(0x061633,.32);g.fillRect(0,135,960,465);}
+  if(!this.coral && this.layer==="deep"){g.fillStyle(0x061633,.32);g.fillRect(0,135,960,465);}
+  if(this.coral)this.drawShoal();
   this.boat.setTint(sea>1?0xa8c1ce:0xffffff);
  }
- spawn(x?:number,y?:number){
-  const id=pickFish(this.sea,this.layer),shiny=Math.random()<goldenChance,f=species[id];
-  const sprite=this.add.image(x??Phaser.Math.Between(60,890),y??Phaser.Math.Between(215,510),(shiny?'s':'f')+id).setScale(.9+f.rank*.12).setInteractive();
-  const swimmer={sprite,id,shiny,speed:(Math.random()<.5?-1:1)*(12+Math.random()*18)*(this.sea===1?1.3:1),baseY:sprite.y,phase:Math.random()*7};sprite.setFlipX(swimmer.speed<0);
+ private mapLabel(x:number,y:number,value:string,color:string){
+  return this.add.text(x,y,value,{fontFamily:'sans-serif',fontSize:'17px',fontStyle:'bold',color,
+   backgroundColor:'#123640',padding:{x:7,y:3}}).setOrigin(.5).setDepth(9).setVisible(false);
+ }
+ private populate(){
+  this.swimmers.forEach(f=>f.sprite.destroy());this.swimmers=[];
+  this.shadows.forEach(s=>s.destroy());this.shadows=[];
+  this.lastKelpFrame=-1;this.kelp.clear();this.drawBackground();
+  if(this.coral){
+   shoalSchool.forEach(f=>this.resident(f.id,f.x,f.y,'shallow'));
+   this.populateKelp();
+  }else for(let i=0;i<10;i++)this.spawn(65+i*88,235+(i*61)%260);
+  this.shoalLabel.setVisible(this.coral);this.kelpLabel.setVisible(this.coral);
+  this.trailLabel.setVisible(this.coral && this.trailReady);
+  this.aimAt(this.aim);
+ }
+ private populateKelp(){
+  for(const f of kelpSchool){
+   if(this.upgraded){
+    this.resident(f.id,f.x,f.y,'deep');
+   }else{
+    const shadow=this.add.image(f.x,f.y,'shadow'+f.id).setScale(1.05).setAlpha(.37).setDepth(1);
+    this.shadows.push(shadow);
+   }
+  }
+ }
+ private resident(id:number,x:number,y:number,layer:Layer){
+  const fish=this.makeFish(id,Math.random()<goldenChance,x,y,layer);
+  fish.patrol={center:x,radius:layer==='deep'?16:28};
+  // Fronds cover the deep school until a bait draws a fish out into the light.
+  if(layer==='deep')fish.sprite.setDepth(1).setAlpha(.30);
+  this.swimmers.push(fish);
+  return fish;
+ }
+ private makeFish(id:number,shiny:boolean,x:number,y:number,layer:Layer):Swimmer{
+  const sprite=this.add.image(x,y,(shiny?'s':'f')+id).setScale(.9+species[id].rank*.12);
+  // Check opaque pixels, so the empty margins of a fish do not intercept casts onto the water.
+  sprite.setInteractive(this.coral?{pixelPerfect:true}:undefined);
+  if(this.coral)sprite.setDepth(3);
+  const swimmer:Swimmer={sprite,id,shiny,layer,speed:(Math.random()<.5?-1:1)*(12+Math.random()*18)*(this.sea===1?1.3:1),baseY:y,phase:Math.random()*7};
+  sprite.setFlipX(swimmer.speed<0);
   sprite.on('pointerover',()=>{if(!this.locked)this.onFishHover(id,shiny);});
   sprite.on('pointerout',()=>this.onFishHover(null));
-  sprite.on('pointerdown',()=>{if(!this.locked)this.onFish(id,shiny,sprite.x,sprite.y);});this.swimmers.push(swimmer);
+  sprite.on('pointerdown',(p:Phaser.Input.Pointer)=>{
+   if(this.locked || this.pointsAtTrail(p))return;
+   this.releaseHook();
+   if(this.coral){this.hooked=swimmer;sprite.setDepth(3).setAlpha(1);}
+   this.onFish(id,shiny,sprite.x,sprite.y,this.coral?layer:undefined);
+  });
+  return swimmer;
+ }
+ spawn(x?:number,y?:number){
+  const id=pickFish(this.sea,this.layer);
+  this.swimmers.push(this.makeFish(id,Math.random()<goldenChance,x??Phaser.Math.Between(60,890),y??Phaser.Math.Between(215,510),this.layer));
+ }
+ setCoralState(enabled:boolean,upgraded:boolean,trailReady:boolean){
+  const changed=this.coralEnabled!==enabled, gearChanged=this.upgraded!==upgraded, trailChanged=this.trailReady!==trailReady;
+  if(!changed && !gearChanged && !trailChanged)return;
+  this.coralEnabled=enabled;this.upgraded=upgraded;this.trailReady=trailReady;
+  if(trailChanged)this.revealSeconds=trailReady?3.4:0;
+  if(!this.bg || this.sea!==0)return;
+  if(changed || (gearChanged && !upgraded)){this.populate();return;}
+  if(this.coral && gearChanged){
+   this.shadows.forEach(s=>s.destroy());this.shadows=[];
+   this.populateKelp();
+  }
+  this.trailLabel.setVisible(this.coral && trailReady);
+  this.aimAt(this.aim);
+ }
+ private pointsAtTrail(p:CastPoint){
+  return this.coral && this.trailReady && Math.hypot(p.x-CORAL_CAST.trail.x,p.y-CORAL_CAST.trail.y)<=CORAL_CAST.trailRadius;
+ }
+ aimAt(point:CastPoint){
+  this.aim={x:point.x,y:point.y};
+  this.preview=planCoralCast(this.aim,this.upgraded,this.trailReady);
+  if(this.guide)this.drawPreview();
+  if(this.coral)this.onAim(this.preview);
+ }
+ castAim(){if(this.coral && !this.locked && !this.bait && this.bg)this.onCast(this.preview);}
+ private drawPreview(){
+  const g=this.guide.clear();this.landingLabel.setVisible(false);
+  if(!this.coral)return;
+  const {aim,landing,range,distance,clipped}=this.preview,origin=CORAL_CAST.origin;
+  const r=range*CORAL_CAST.pixelsPerMeter;
+  g.lineStyle(2,0xbbeecb,.43);
+  for(let deg=0;deg<180;deg+=3){
+   const a=Phaser.Math.DegToRad(deg),b=Phaser.Math.DegToRad(deg+1.4),y=origin.y+r*Math.sin(a);
+   if(y>=waterline)g.lineBetween(origin.x+r*Math.cos(a),y,origin.x+r*Math.cos(b),origin.y+r*Math.sin(b));
+  }
+  const dashed=(from:CastPoint,to:CastPoint,color:number,alpha:number)=>{
+   const dx=to.x-from.x,dy=to.y-from.y,len=Math.hypot(dx,dy);
+   g.lineStyle(2,color,alpha);
+   for(let d=0;d<len;d+=12){const end=Math.min(len,d+5);g.lineBetween(from.x+dx*d/len,from.y+dy*d/len,from.x+dx*end/len,from.y+dy*end/len);}
+  };
+  dashed(origin,landing,0xf6e6b8,.72);
+  if(clipped){
+   dashed(landing,aim,0xb3d1d4,.52);
+   g.lineStyle(2,0xc5dddf,.8).strokeRect(aim.x-6,aim.y-6,12,12);
+  }
+  const color=this.preview.habitat==='trail'?0xffb9ae:0xffda84;
+  g.lineStyle(2,0x143a42,.9).strokeCircle(landing.x,landing.y,10);
+  g.lineStyle(2,color).strokeCircle(landing.x,landing.y,8);
+  g.fillStyle(color).fillRect(landing.x-2,landing.y-2,4,4);
+  const label=this.landingLabel.setText(`착수 ${Math.round(distance)} m / 줄 ${range} m`).setOrigin(0,.5);
+  const right=landing.x+14;
+  const labelX=right+label.width>954 ? landing.x-14-label.width : right;
+  // Keep the readout inside the sea, above the marker and clear of the specimen clue.
+  const labelLeft=Phaser.Math.Clamp(labelX,6,954-label.width);
+  let labelY=landing.y-16;
+  for(const name of [this.shoalLabel,this.kelpLabel,this.trailLabel]){
+   if(!name.visible)continue;
+   const overlapsX=labelLeft<name.x+name.width/2 && labelLeft+label.width>name.x-name.width/2;
+   if(overlapsX && Math.abs(labelY-name.y)<(name.height+label.height)/2+3)labelY=name.y-name.height/2-label.height/2-4;
+  }
+  label.setPosition(labelLeft,labelY).setVisible(!this.locked);
+  g.setVisible(!this.locked);
+ }
+ private drawShoal(){
+  const g=this.bg;
+  // A stepped shelf puts pale sand in the light and casts a cool shadow below the lip.
+  const shelf=[[30,405],[30,365],[89,365],[89,341],[161,341],[161,329],[280,329],[280,336],[359,336],[359,350],[425,350],[425,371],[477,371],[477,408],[434,408],[434,430],[334,430],[334,442],[125,442],[125,425],[64,425],[64,405]];
+  g.fillStyle(0x285d60).fillPoints(shelf.map(([x,y])=>new Phaser.Math.Vector2(x,y)),true);
+  for(const [x,y,w] of [[30,363,61],[89,339,73],[161,327,120],[280,334,81],[359,348,68],[425,369,51]]){
+   g.fillStyle(0x80aaa0).fillRect(x,y+6,w,8);g.fillStyle(0xc4c399).fillRect(x,y,w,6);
+   g.fillStyle(0xd7d2a7).fillRect(x+10,y-3,w*.4,3);
+  }
+  for(let i=0;i<19;i++){
+   const x=56+(i*61)%392,y=374+(i*13)%40;
+   g.fillStyle(i%3?0x417676:0x63908a).fillRect(x,y,9+(i%4)*4,3);
+  }
+  // Branching coral clusters on the shelf and a smaller outcrop at the 100 m landing.
+  for(const [x,y,h] of [[105,339,27],[139,339,16],[289,334,22],[408,348,16],[663,370,15],[682,370,9]]){
+   g.fillStyle(0xb57672).fillRect(x,y-h,6,h).fillRect(x-8,y-h*.67,10,5).fillRect(x+4,y-h*.48,10,5);
+   g.fillStyle(0xe4a38a).fillRect(x-9,y-h*.67-7,5,9).fillRect(x+10,y-h*.48-7,5,9).fillRect(x+1,y-h-3,4,9);
+  }
+  for(const [x,y,w,h] of [[647,382,70,7],[688,388,37,12],[709,397,33,13],[728,408,28,14],[618,372,88,10],[632,366,58,9],[684,376,43,8],[595,543,68,45],[646,532,111,51],[712,522,139,64],[806,529,99,58],[885,539,69,43]]){
+   g.fillStyle(0x214951).fillRect(x,y,w,h);g.fillStyle(0x4a7871).fillRect(x+5,y-3,w-13,5);
+  }
+ }
+ private drawKelp(t:number){
+  const g=this.kelp.clear();const tremble=this.revealSeconds>0?Math.sin(t*16)*5:0;
+  for(let i=0;i<25;i++){
+   const x=604+i*13,y=543-Math.round(Math.sin(i/24*Math.PI)*17),height=32+(i*37)%92;
+   const wave=Math.sin(t*1.4+i*.63)*5+(Math.abs(x-CORAL_CAST.trail.x)<72?tremble:0);
+   const dark=i%3===0?0x245651:0x27695d,light=i%3===0?0x487e66:0x59a077;
+   for(let j=0;j<5;j++){
+    const bend=Math.round((Math.sin(i*.9+j*.82)*5+wave)*j/5/2)*2;
+    const segmentY=Math.round(y-height*(j+1)/5),segmentH=Math.ceil(height/5)+2;
+    const w=9-j;
+    g.fillStyle(dark).fillRect(x+bend,segmentY,w,segmentH);
+    g.fillStyle(light,.9).fillRect(x+bend,segmentY,2,segmentH-2);
+    if(j===1 || j===3){const side=(j===1?-1:1)*(i%2?-1:1);
+     g.fillStyle(dark).fillRect(x+bend+(side<0?-8:w-1),segmentY+4,9,4).fillRect(x+bend+(side<0?-10:w+5),segmentY,5,6);}
+   }
+  }
+  for(let i=0;i<6;i++){
+   const x=689+i*9,y=369+Math.round(i*i*1.3),h=16+(i*13)%27;
+   const bend=Math.round(Math.sin(t*1.5+i)*2);
+   g.fillStyle(0x407f69).fillRect(x,y-h/2,5,h/2).fillRect(x+bend,y-h,4,h/2+1);
+   g.fillStyle(0x6aa485).fillRect(x+3,y-h*.7,6,3).fillRect(x+7,y-h*.7-4,3,5);
+  }
+  if(this.trailReady){
+   const {x,y}=CORAL_CAST.trail,beat=(t%1.7)/1.7;
+   g.lineStyle(2,0xffc4af,.8*(1-beat)).strokeEllipse(x,y+2,24+beat*30,12+beat*14);
+   for(let i=0;i<3;i++){const h=(beat+i/3)%1;g.fillStyle(0xffd7be,1-h).fillRect(x+15+i*6,y-8-h*22,3,3);}
+   if(this.revealSeconds>0){
+    const dx=x+Math.round(tremble/2),dy=y+Math.round(Math.sin(t*3)*2);
+    g.fillStyle(0xffb9a8).fillRect(dx+7,dy-12,5,11).fillRect(dx+2,dy-1,10,5).fillRect(dx-8,dy+3,13,5)
+     .fillRect(dx-12,dy-5,6,12).fillRect(dx-9,dy-9,9,5).fillRect(dx-3,dy-6,5,4);
+   }
+  }
+ }
+ playBait(plan:CoralCast,onBite:BiteHandler){
+  this.cancelBait();this.releaseHook();
+  this.bait={plan,elapsed:0,onBite};
+ }
+ cancelBait(){
+  const approach=this.bait?.approach;
+  if(approach){
+   if(approach.visitor)approach.fish.sprite.destroy();
+   else approach.fish.sprite.setPosition(approach.from.x,approach.from.y)
+    .setAlpha(approach.initialAlpha).setDepth(approach.initialDepth);
+  }
+  if(this.bait)this.line?.clear();
+  this.bait=undefined;
+ }
+ private releaseHook(){
+  if(this.hooked && !this.swimmers.includes(this.hooked))this.hooked.sprite.destroy();
+  this.hooked=undefined;
+ }
+ private approachBait(bait:Bait){
+  const {landing,candidates,layer,habitat}=bait.plan;
+  const distance=(f:Swimmer)=>Math.hypot(f.sprite.x-landing.x,f.sprite.y-landing.y);
+  let fish=this.swimmers.filter(f=>f.layer===layer && candidates.includes(f.id) && distance(f)<184)
+   .sort((a,b)=>distance(a)-distance(b))[0];
+  const visitor=!fish;
+  if(visitor){
+   // A fish emerges from the nearest cover when the school is out of view.
+   const id=pickCoralFish(bait.plan),x=landing.x+(landing.x>720?-1:1)*(habitat==='trail'?54:87);
+   fish=this.makeFish(id,habitat!=='trail' && Math.random()<goldenChance,x,Math.min(560,landing.y+33),layer);
+   fish.sprite.disableInteractive();fish.sprite.setAlpha(.15);
+  }
+  const from={x:fish.sprite.x,y:fish.sprite.y},left=landing.x<from.x;
+  bait.approach={
+   fish,from,visitor,initialAlpha:fish.sprite.alpha,initialDepth:fish.sprite.depth,
+   mouthOffset:(left?-1:1)*19*fish.sprite.scaleX,
+   duration:Math.min(1.2,.65+distance(fish)/310),
+  };
+  fish.sprite.setFlipX(left).setDepth(3);
+ }
+ private updateCoral(dt:number,t:number){
+  if(!this.coral)return;
+  const idle=!this.locked && !this.bait;
+  this.guide.setVisible(idle);this.landingLabel.setVisible(idle);
+  if(!this.locked)this.revealSeconds=Math.max(0,this.revealSeconds-dt);
+  const frame=Math.floor(t*14);
+  if(frame!==this.lastKelpFrame){this.drawKelp(t);this.lastKelpFrame=frame;}
+  if(idle && this.hooked)this.releaseHook();
+  this.shadows.forEach((s,i)=>{s.x=kelpSchool[i].x+Math.sin(t*.55+i)*8;s.y=kelpSchool[i].y+Math.sin(t+i)*4;});
+  const bait=this.bait;
+  if(!bait)return;
+  bait.elapsed+=dt;
+  const {landing}=bait.plan,origin=CORAL_CAST.origin,flight=Math.min(1,bait.elapsed/travelSeconds);
+  const x=Phaser.Math.Linear(origin.x,landing.x,flight),y=Phaser.Math.Linear(origin.y,landing.y,flight)-Math.sin(Math.PI*flight)*64;
+  const g=this.line.clear().lineStyle(2,0xf9e5b4,.85).lineBetween(origin.x,origin.y,x,y);
+  g.fillStyle(0x513e38).fillRect(x-4,y-5,9,11);g.fillStyle(0xffc17f).fillRect(x-3,y-4,7,7);
+  g.fillStyle(0xfff3c3).fillRect(x-2,y-6,4,4).fillRect(x+1,y+3,4,2);
+  if(flight<1)return;
+  if(!bait.approach)this.approachBait(bait);
+  const a=bait.approach!,age=bait.elapsed-travelSeconds,fraction=Phaser.Math.Clamp((age-.12)/a.duration,0,1);
+  const ease=Phaser.Math.Easing.Sine.InOut(fraction),s=a.fish.sprite;
+  s.x=Phaser.Math.Linear(a.from.x,x-a.mouthOffset,ease);
+  s.y=Phaser.Math.Linear(a.from.y,y,ease)-Math.sin(Math.PI*fraction)*11;
+  s.angle=Math.sin(fraction*Math.PI*5)*5;
+  if(a.initialAlpha<1)s.setAlpha(Phaser.Math.Linear(a.initialAlpha,1,Math.min(1,age*2.2)));
+  if(age<.6)g.lineStyle(2,0xc9f5d5,1-age/.6).strokeEllipse(x,y,12+age*88,5+age*40);
+  if(fraction===1){
+   g.lineStyle(2,0xffe4a3).lineBetween(x-8,y-9,x-14,y-17).lineBetween(x+5,y-11,x+9,y-19);
+   if(age>=a.duration+.31){
+    this.bait=undefined;this.line.clear();
+    this.hooked=a.fish;
+    bait.onBite(a.fish.id,a.fish.shiny,x,y);
+   }
+  }
  }
  setBoss(available:boolean,cleared=false){
   this.bossCleared=cleared;if(!this.bg)return;
-  if(available&&!this.boss){this.boss=this.add.image(750,325,'boss'+this.sea).setScale(.76).setAlpha(.85);this.bossLabel=this.add.text(750,258,'BOSS',{fontFamily:'monospace',fontSize:'17px',fontStyle:'bold',color:'#ff5959',stroke:'#190d21',strokeThickness:4}).setOrigin(.5);this.boss.setInteractive().on('pointerdown',()=>document.getElementById('boss')?.click());}
+  if(available&&!this.boss){
+   const x=this.coral?472:750,y=this.coral?455:325;
+   this.boss=this.add.image(x,y,'boss'+this.sea).setScale(.76).setAlpha(.85);
+   this.bossLabel=this.add.text(x,y-67,'BOSS',{fontFamily:'monospace',fontSize:'17px',fontStyle:'bold',color:'#ff5959',stroke:'#190d21',strokeThickness:4}).setOrigin(.5);
+   this.boss.setInteractive().on('pointerdown',(p:Phaser.Input.Pointer)=>{
+    if(!this.locked && !this.pointsAtTrail(p))document.getElementById('boss')?.click();
+   });
+  }
   else if(!available&&this.boss){this.boss.destroy();this.bossLabel?.destroy();this.boss=undefined;this.bossLabel=undefined;}
   this.bossLabel?.setText(cleared?'BOSS · CLEARED':'BOSS');
  }
@@ -82,7 +397,17 @@ export class Ocean extends Phaser.Scene {
   this.tweens.add({targets:p,x,y,duration:500,ease:'Cubic.easeOut',onUpdate:()=>{hook.setPosition(p.x,p.y);this.line.clear().lineStyle(1,0xe5dab1,.8).lineBetween(500,115,p.x,p.y);},onComplete:()=>{hook.destroy();this.line.clear();}});
  }
  reel(id:number,shiny:boolean,x:number,y:number,animate=true){
-  const f=this.swimmers.find(f=>f.id===id&&f.shiny===shiny);if(f){x=f.sprite.x;y=f.sprite.y;f.sprite.destroy();this.swimmers=this.swimmers.filter(a=>a!==f);this.spawn();}
+  const f=this.hooked?.id===id && this.hooked.shiny===shiny ? this.hooked : this.swimmers.filter(f=>f.id===id&&f.shiny===shiny).sort((a,b)=>Math.hypot(a.sprite.x-x,a.sprite.y-y)-Math.hypot(b.sprite.x-x,b.sprite.y-y))[0];
+  this.hooked=undefined;
+  if(f){
+   const resident=this.swimmers.includes(f);
+   x=f.sprite.x;y=f.sprite.y;f.sprite.destroy();this.swimmers=this.swimmers.filter(a=>a!==f);
+   if(f.patrol){
+    const home={x:f.patrol.center,y:f.baseY};
+    const pool=planCoralCast(home,this.upgraded,false);
+    this.resident(pickCoralFish(pool),home.x,home.y,f.layer);
+   }else if(resident)this.spawn();
+  }
   if(!animate)return;
   const fish=this.add.image(x,y,(shiny?'s':'f')+id).setDepth(21).setData('temporary',true),p={x,y};
   this.tweens.add({targets:p,x:448,y:105,duration:850,ease:'Cubic.easeIn',onUpdate:()=>{fish.setPosition(p.x,p.y).setAngle(-30);this.line.clear().lineStyle(1,0xe4d5a5,.8).lineBetween(500,115,p.x,p.y);},onComplete:()=>{fish.destroy();this.line.clear();this.sparkle();}});
@@ -100,7 +425,18 @@ export class Ocean extends Phaser.Scene {
   for(const b of this.bubbles){b.y-=b.s*dt;if(b.y<155)b.y=590;this.decor.strokeCircle(b.x+Math.sin(t+b.x)*4,b.y,b.r);}
   if(this.sea===0)for(let i=0;i<24;i++){this.decor.fillStyle(i%2?0xbad7b4:0x65b4b1,.3);this.decor.fillRect((i*103+t*(i%2?6:-4)+9600)%960,128+(i%4)*4,12+i%5*5,2);}
   if(this.sea===3)for(let i=0;i<24;i++){this.decor.fillStyle(0x968e9c,.06);this.decor.fillRect(110+(i%4)*220+Math.sin(t+i)*12,445-((t*25+i*17)%260),12,11);}
-  for(const f of this.swimmers){f.sprite.x+=f.speed*dt;if(f.sprite.x>895){f.sprite.x=895;f.speed=-Math.abs(f.speed);f.sprite.setFlipX(true);}if(f.sprite.x<55){f.sprite.x=55;f.speed=Math.abs(f.speed);f.sprite.setFlipX(false);}f.sprite.y=f.baseY+Math.sin(t*1.3+f.phase)*8;f.sprite.angle=Math.sin(t*2+f.phase)*2;if(this.sea>1||f.shiny){this.decor.fillStyle(f.shiny?0xf5d58f:0x76c6d4,.09+.035*Math.sin(t*2+f.phase));this.decor.fillCircle(f.sprite.x,f.sprite.y,35);}}
-  if(this.boss){this.boss.y=330+Math.sin(t)*9;this.bossLabel?.setY(this.boss.y-66);}
+  this.updateCoral(dt,t);
+  for(const f of this.swimmers){
+   if(f===this.bait?.approach?.fish || (this.locked && f===this.hooked))continue;
+   const left=f.patrol ? f.patrol.center-f.patrol.radius : 55, right=f.patrol ? f.patrol.center+f.patrol.radius : 895;
+   f.sprite.x+=f.speed*dt;
+   f.sprite.setFlipX(f.speed<0);
+   if(f.sprite.x>right){f.speed=-Math.abs(f.speed);f.sprite.setFlipX(true);}
+   if(f.sprite.x<left){f.speed=Math.abs(f.speed);f.sprite.setFlipX(false);}
+   f.sprite.y=Phaser.Math.Linear(f.sprite.y,f.baseY+Math.sin(t*1.3+f.phase)*8,Math.min(1,dt*7));
+   f.sprite.angle=Math.sin(t*2+f.phase)*2;
+   if(this.sea>1||f.shiny){this.decor.fillStyle(f.shiny?0xf5d58f:0x76c6d4,.09+.035*Math.sin(t*2+f.phase));this.decor.fillCircle(f.sprite.x,f.sprite.y,35);}
+  }
+  if(this.boss){this.boss.y=(this.coral?455:330)+Math.sin(t)*9;this.bossLabel?.setY(this.boss.y-66);}
  }
 }

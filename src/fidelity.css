@@ -106,3 +106,93 @@ dialog:has(.market-grid){max-width:min(1060px,95vw);width:1060px}.market-ticker{
 #trail-panel[data-state="ready"] { border-left-color: #e3c277; }
 #trail-panel[data-state="ready"] #trail-cast:enabled { background: #f0d28a; color: #173337; border-color: #f8dfa4; }
 #trail-panel[data-state="complete"] { border-left-color: #a1c998; }
+
+#cast-chart {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 9px 14px;
+  background: #10323a;
+  border-top: 1px solid #3e6666;
+  border-bottom: 1px solid #304d50;
+}
+#cast-chart[hidden], .below-ocean [hidden], .cast-points [hidden] { display: none; }
+.cast-points { display: flex; flex-wrap: wrap; gap: 5px; }
+.cast-points button, #bait-cancel {
+  padding: 6px 10px;
+  border: 1px solid #557872;
+  border-radius: 3px;
+  background: #14343c;
+  color: #d2e6d6;
+  font: inherit;
+  font-size: 13px;
+}
+.cast-points button[aria-pressed="true"] { color: #e8ffde; border-color: #93b9a1; background: #30584d; }
+#aim-trail { color: #ffd8c8; border-color: #aa8378; }
+#cast-readout { color: #f4dfa6; font-size: 13px; font-variant-numeric: tabular-nums; }
+#cast-chart:not([hidden]) + .below-ocean #cast {
+  color: #c4d5c9;
+  background: transparent;
+  border: 1px solid #44615e;
+  font-size: 13px;
+  padding: 10px 14px;
+}
+#bait-cancel { color: #f4dfa6; }
+.cast-points button:focus-visible, #bait-cancel:focus-visible, #game:focus-visible {
+  outline: 3px solid #ffe39a;
+  outline-offset: -3px;
+}
+@media(max-width:760px) {
+  #cast-chart { padding: 7px 10px; gap: 5px 10px; }
+  .cast-points button { min-height: 34px; }
+  #cast-readout { font-size: 12px; }
+  #cast-chart:not([hidden]) + .below-ocean :is(#cast-aim, #cast, #net) {
+    padding: 9px 6px;
+    font-size: 12px;
+  }
+}
+.depth-scale[hidden] { display: none; }
+#quick-depth-label {
+  align-self: center;
+  margin-right: 2px;
+  color: #b6cfc4;
+  font-size: 12px;
+}
+.depth-shop #line:enabled { border-color: #cbb579; color: #ffe2a0; }
+
+@media(min-width:1000px) and (max-height:830px) {
+  .shell:has(#cast-chart:not([hidden])) {
+    max-width: clamp(950px, calc((100dvh - 325px) * 1.6 + 365px), 1512px);
+  }
+}
+@media(max-width:760px) {
+  #quick-depth-label { width: 46px; font-size: 10px; line-height: 1.35; }
+  .ocean-card:has(#cast-chart:not([hidden])) .depth-tools > div { flex-wrap: nowrap; }
+  .ocean-card:has(#cast-chart:not([hidden])) .depth-tools > div button { padding: 6px; font-size: 11px; }
+}
+.ocean-card:has(#cast-chart:not([hidden])) .scene-hint {
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 95%;
+  padding: 3px 7px;
+  background: #0c2938df;
+  color: #e4efe0;
+  line-height: 1.4;
+}
+@media(max-width:380px) {
+  .ocean-card:has(#cast-chart:not([hidden])) .below-ocean {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, .8fr) minmax(0, 1.2fr);
+    align-items: stretch;
+    gap: 5px;
+    padding: 8px;
+  }
+  #cast-chart:not([hidden]) + .below-ocean #net { white-space: normal; }
+  #cast-chart:not([hidden]) + .below-ocean #net-label { display: block; }
+  .ocean-card:has(#cast-chart:not([hidden])) .ocean-head { gap: 4px; padding: 0 7px; letter-spacing: 0; }
+  .ocean-card:has(#cast-chart:not([hidden])) .ocean-head b { font-size: 11px; white-space: nowrap; }
+}

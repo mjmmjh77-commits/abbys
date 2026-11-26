@@ -1,4 +1,5 @@
 export type Layer = 'shallow' | 'deep';
+const coralDepth = { boundary: 100, end: 200 } as const;
 type FishEntry = [
   id: number,
   name: string,
@@ -42,8 +43,7 @@ const habitats: Habitat[] = [
     perk: '잔잔한 해류 · 넓은 포획 구역',
     color: 0x74cabc,
     start: 0,
-    boundary: 100,
-    end: 200,
+    ...coralDepth,
     target: 6,
     lineCost: 120,
     reelCost: 100,
@@ -222,3 +222,24 @@ export const species = habitats.flatMap((area, sea) =>
 );
 export const catchWeights = [32, 23, 17, 11, 7, 4, 2.5, 1.5, 1, 0.5];
 export const goldenChance = 0.025;
+
+// Positions in the ocean scene's 960 × 600 coordinate space.
+export const CORAL_CAST = {
+  depth: coralDepth,
+  waterline: 148,
+  origin: { x: 516, y: 76 },
+  pixelsPerMeter: 3.2,
+  shoal: { x: 360, y: 280 },
+  shoalRadius: { x: 150, y: 85 },
+  kelp: { x: 790, y: 450 },
+  kelpRadius: { x: 135, y: 125 },
+  trail: { x: 833, y: 477 },
+  trailRadius: 34,
+} as const;
+const coral = seas[0];
+export const coralBaitPools = {
+  shoal: coral.shallow,
+  edge: coral.shallow.filter((id) => species[id].rank < 2),
+  kelp: coral.deep.filter((id) => !coral.shallow.includes(id) && id !== coral.trailId),
+  trail: [coral.trailId],
+};
