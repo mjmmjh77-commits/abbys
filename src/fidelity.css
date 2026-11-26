@@ -131,7 +131,7 @@ dialog:has(.market-grid){max-width:min(1060px,95vw);width:1060px}.market-ticker{
 }
 .cast-points button[aria-pressed="true"] { color: #e8ffde; border-color: #93b9a1; background: #30584d; }
 #aim-trail { color: #ffd8c8; border-color: #aa8378; }
-#cast-readout { color: #f4dfa6; font-size: 13px; font-variant-numeric: tabular-nums; }
+#cast-readout { word-break: keep-all; color: #f4dfa6; font-size: 13px; font-variant-numeric: tabular-nums; }
 #cast-chart:not([hidden]) + .below-ocean #cast {
   color: #c4d5c9;
   background: transparent;
@@ -195,4 +195,47 @@ dialog:has(.market-grid){max-width:min(1060px,95vw);width:1060px}.market-ticker{
   #cast-chart:not([hidden]) + .below-ocean #net-label { display: block; }
   .ocean-card:has(#cast-chart:not([hidden])) .ocean-head { gap: 4px; padding: 0 7px; letter-spacing: 0; }
   .ocean-card:has(#cast-chart:not([hidden])) .ocean-head b { font-size: 11px; white-space: nowrap; }
+}
+
+#coral-specimen {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  pointer-events: none;
+}
+#coral-specimen #trail-panel {
+  margin: 0;
+  max-width: 220px;
+  display: grid;
+  grid-template-columns: 34px auto;
+  gap: 4px 7px;
+  align-items: center;
+  padding: 6px 9px;
+  border: 1px solid #58827f;
+  border-left: 3px solid #8bb49c;
+  background: #0b2935ec;
+  color: #def0df;
+}
+#coral-specimen #trail-panel[data-state="ready"] { border-left-color: #ffc3b2; }
+#coral-specimen #trail-art { width: 34px; height: 23px; }
+#coral-specimen #trail-title { font-size: 13px; }
+#coral-specimen .trail-copy small { font-size: 10px; margin-right: 5px; }
+#coral-specimen #trail-progress { display: block; word-break: keep-all; font-size: 11px; }
+#coral-specimen #trail-clue, #coral-specimen #trail-cast:disabled { display: none; }
+#coral-specimen #trail-cast {
+  grid-column: 2;
+  justify-self: start;
+  min-height: 27px;
+  padding: 3px 9px;
+  font-size: 12px;
+  pointer-events: auto;
+}
+@media(max-width:480px) {
+  #coral-specimen { top: 5px; right: 5px; }
+  #coral-specimen #trail-panel { max-width: 158px; grid-template-columns: auto; gap: 2px; padding: 4px 6px; }
+  #coral-specimen #trail-title { font-size: 11px; }
+  #coral-specimen #trail-progress { font-size: 10px; }
+  #coral-specimen #trail-art { display: none; }
+  #coral-specimen #trail-cast { grid-column: 1; }
 }

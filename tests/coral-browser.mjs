@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { chromium } from 'playwright-core';
+import { mapPoint, playFight } from './play-fight.mjs';
 import { fishingRules, seas, species } from '../src/model.ts';
 
 const browser = await chromium.launch({
@@ -28,41 +29,14 @@ try {
     await $('#game canvas').waitFor();
     await $('#trail-panel').waitFor();
   };
-  const mapPoint = async (x, y) => {
-    const canvas = $('#game canvas');
-    await canvas.scrollIntoViewIfNeeded();
-    const b = await canvas.boundingBox();
-    return { x: b.x + x * b.width / 960, y: b.y + y * b.height / 600 };
-  };
-  // Read only displayed controls. All actions go through real browser input.
-  async function playFight() {
-    await $('#track').waitFor();
-    await $('#track').scrollIntoViewIfNeeded();
-    const deadline = Date.now() + 60_000;
-    while (await $('#minigame').isVisible()) {
-      assert.ok(Date.now() < deadline, '포획 제한시간');
-      const control = await page.evaluate(() => {
-        const trackFish = document.querySelector('#fish-dot');
-        const hold = document.querySelector('#hold-target');
-        const pos = (trackFish || hold)?.getBoundingClientRect();
-        if (pos) return { move: [pos.x + pos.width / 2, pos.y + pos.height / 2] };
-        const timing = document.querySelector('#timing-dot');
-        if (timing && Math.abs(parseFloat(timing.style.left) - 50) < 4) return { hit: true };
-        const ring = document.querySelector('#ring');
-        if (ring?.textContent === '길게 누르기') return { bossHold: true };
-        if (ring?.style.background === 'rgb(80, 118, 91)') return { bossHit: true };
-        return { failed: !!document.querySelector('#retry') };
-      });
-      assert.ok(!control.failed, '자동 입력 중 미니게임 실패');
-      if (control.move) await page.mouse.move(...control.move);
-      if (control.hit) await page.keyboard.press('Space');
-      if (control.bossHold) await page.keyboard.press('Enter', { delay: 800 });
-      if (control.bossHit) await page.keyboard.press('Enter');
-      await page.waitForTimeout(45);
-    }
+  function assertKelpDash(phases) {
+    assert.deepEqual(phases.map(p => p.phase), ['swim', 'turn', 'dash', 'rest']);
+    assert.match(phases[1].cue, /→/);
+    assert.match(phases[2].cue, /돌진/);
   }
-  async function catchOne(before, pool) {
-    await playFight();
+  async function catchOne(before, pool, settings) {
+    const phases = await playFight(page, settings);
+    if (settings?.tracking === 'keyboard') assertKelpDash(phases);
     const after = await saved();
     assert.equal(after.caught[0], before.caught[0] + 1);
     assert.equal(after.survey[0], before.survey[0] + 1);
@@ -90,7 +64,7 @@ try {
   assert.equal(freshSave.gold, 100);
   assert.equal(freshSave.caught[0], 0);
 
-  const kelp = async () => mapPoint(790, 450);
+  const kelp = async () => mapPoint(page, 790, 450);
   let point = await kelp();
   await page.mouse.move(point.x, point.y);
   const shortPreview = await $('#cast-readout').innerText();
@@ -147,7 +121,7 @@ try {
   await capture('seahorse-trail');
   // Both entrances must name the same specimen, even after a cancellation and reload.
   await $('#cast-aim:enabled').waitFor();
-  const trace = await mapPoint(833, 477);
+  const trace = await mapPoint(page, 833, 477);
   await page.mouse.move(trace.x, trace.y);
   await page.mouse.click(trace.x, trace.y);
   await $('#track').waitFor();
@@ -166,7 +140,7 @@ try {
   await $('#retry').waitFor({ timeout: 25_000 });
   assert.equal((await saved()).gold, state.gold);
   await $('#retry').dblclick();
-  state = await catchOne(state, [seas[0].trailId]);
+  state = await catchOne(state, [seas[0].trailId], { tracking: 'keyboard' });
   assert.equal(state.trailCompleted[0], true);
   assert.equal(state.deepCaught[0], 4);
   await reload();
@@ -178,7 +152,7 @@ try {
   assert.match(await card.innerText(), /해역 관찰 표본/);
   await $('#close-modal').click();
   await $('#boss').click();
-  await playFight();
+  assertKelpDash(await playFight(page));
   state = await saved();
   assert.ok(state.bosses[0] && state.unlocked[1]);
   assert.equal(state.caught[0], 5);

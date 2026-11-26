@@ -1,7 +1,10 @@
 export const LEGACY_KEY = 'abyss-fishing-v1';
 export const KEY = 'abyss-fishing-v2';
-import { species, seas, catchWeights, CORAL_CAST, coralBaitPools, type Layer } from './catalog.ts';
-export { species, seas, CORAL_CAST, type Layer } from './catalog.ts';
+import {
+  species, seas, catchWeights, CORAL_CAST, coralBaitPools, seahorseBiteChance,
+  CURRENT_CAST, currentBaitPools, type Layer,
+} from './catalog.ts';
+export { species, seas, CORAL_CAST, CURRENT_CAST, type Layer } from './catalog.ts';
 export const ranks = ['일반', '고급', '희귀', '특급', '영웅', '전설', '신화', '고대', '초월', '심연'];
 export const colors = [
   '#a7cec6',
@@ -23,6 +26,7 @@ export interface Save {
   unlocked: boolean[];
   survey: number[];
   coralSurveyBonus: number;
+  currentSurveyBonus: number;
   deepCaught: number[];
   trailCompleted: boolean[];
   maxCm: number[];
@@ -67,6 +71,7 @@ export const fresh = (): Save => ({
   unlocked: seas.map((_, i) => i === 0),
   survey: seas.map(() => 0),
   coralSurveyBonus: 0,
+  currentSurveyBonus: 0,
   deepCaught: seas.map(() => 0),
   trailCompleted: seas.map(() => false),
   maxCm: species.map(() => 0),
@@ -119,6 +124,7 @@ export function parseSave(text: string | null): Save {
     'unlocked',
     'survey',
     'coralSurveyBonus',
+    'currentSurveyBonus',
     'deepCaught',
     'trailCompleted',
     'maxCm',
@@ -131,7 +137,7 @@ export function parseSave(text: string | null): Save {
   for (const [key, initial] of Object.entries(base)) {
     if (key === 'version' || (legacy && extra.includes(key))) continue;
     const value = x[key];
-    if ((key === 'trailCompleted' || key === 'coralSurveyBonus') && value === undefined) continue;
+    if (value === undefined && ['trailCompleted', 'coralSurveyBonus', 'currentSurveyBonus'].includes(key)) continue;
     if (
       value === undefined &&
       legacy &&
@@ -184,6 +190,7 @@ export function parseSave(text: string | null): Save {
     !base.unlocked[0] ||
     !base.unlocked[base.sea] ||
     base.coralSurveyBonus > 2 * base.survey[0] ||
+    base.currentSurveyBonus > 2 * base.survey[1] ||
     (base.layer === 'deep' && !base.line[base.sea]) ||
     base.deepCaught.some((n, i) => n > base.survey[i] || (n > 0 && !base.line[i])) ||
     base.tradable.some((n, i) => n > fishCards(base, i))
@@ -426,10 +433,13 @@ export function completeTrail(s: Save, id: number): boolean {
   return true;
 }
 
-// Existing saves already contain one survey unit per manual catch. Only store
-// the additional points earned by multi-round coral fish since this update.
-export const bossProgress = (s: Save, sea = s.sea) =>
-  s.survey[sea] + (sea === 0 ? s.coralSurveyBonus : 0);
+// Manual fish retain one unit each in the original survey and ranking counters.
+// Older saves only need a zero default for the additional points in each sea.
+const bonusFields = ['coralSurveyBonus', 'currentSurveyBonus'] as const;
+export function bossProgress(s: Save, sea = s.sea) {
+  const bonusField = bonusFields[sea];
+  return s.survey[sea] + (bonusField ? s[bonusField] : 0);
+}
 export const bossReady = (s: Save) =>
   s.bosses[s.sea] || (bossProgress(s) >= seas[s.sea].target && s.deepCaught[s.sea] > 0);
 export function salePrice(id: number, cm: number, shiny = false) {
@@ -469,9 +479,10 @@ export function settleCatch(
   if (!s.questKinds.includes(id)) s.questKinds.push(id);
   let surveyGain = 0;
   if (source === 'manual') {
-    surveyGain = f.sea === 0 ? baseRounds(f.rank) : 1;
+    const bonusField = bonusFields[f.sea];
+    surveyGain = bonusField ? baseRounds(f.rank) : 1;
     s.survey[f.sea]++;
-    if (f.sea === 0) s.coralSurveyBonus += surveyGain - 1;
+    if (bonusField) s[bonusField] += surveyGain - 1;
     if (s.layer === 'deep') s.deepCaught[f.sea]++;
     s.misses = 0;
   }
@@ -510,24 +521,36 @@ function pickFromPool(pool: number[], rng: () => number) {
 }
 
 export type CastPoint = { x: number; y: number };
-export interface CoralCast {
+interface CastGeometry {
   aim: CastPoint;
   landing: CastPoint;
-  range: 100 | 200;
+  driftEnd: CastPoint;
   distance: number;
   clipped: boolean;
-  habitat: keyof typeof coralBaitPools;
   layer: Layer;
   candidates: number[];
+  specimenRecapture: boolean;
 }
+export interface CoralCast extends CastGeometry {
+  sea: 0;
+  range: 100 | 200;
+  habitat: keyof typeof coralBaitPools;
+}
+export interface CurrentCast extends CastGeometry {
+  sea: 1;
+  range: 600 | 1000;
+  habitat: 'channel' | 'feeding' | 'deepFeeding';
+}
+export type BaitCast = CoralCast | CurrentCast;
 export const coralCastRange = (upgraded: boolean) =>
   upgraded ? CORAL_CAST.depth.end : CORAL_CAST.depth.boundary;
+export const currentCastRange = (upgraded: boolean) =>
+  upgraded ? CURRENT_CAST.depth.end : CURRENT_CAST.depth.boundary;
 const ellipseDistance = (point: CastPoint, center: CastPoint, radius: CastPoint) =>
   Math.hypot((point.x - center.x) / radius.x, (point.y - center.y) / radius.y);
 
-export function planCoralCast(point: CastPoint, upgraded: boolean, trailReady: boolean): CoralCast {
-  const { origin, pixelsPerMeter, waterline, shoal, shoalRadius, kelp, kelpRadius, trail, trailRadius } =
-    CORAL_CAST;
+function projectWithinLine(point: CastPoint, range: number, map: typeof CORAL_CAST | typeof CURRENT_CAST) {
+  const { origin, waterline, pixelsPerMeter } = map;
   const aim = {
     x: Math.min(960, Math.max(0, point.x)),
     y: Math.min(599, Math.max(waterline, point.y)),
@@ -535,7 +558,6 @@ export function planCoralCast(point: CastPoint, upgraded: boolean, trailReady: b
   const dx = aim.x - origin.x;
   const dy = aim.y - origin.y;
   const distance = Math.hypot(dx, dy);
-  const range = coralCastRange(upgraded);
   const radius = range * pixelsPerMeter;
   const clipped = distance > radius;
   let landing = aim;
@@ -547,22 +569,60 @@ export function planCoralCast(point: CastPoint, upgraded: boolean, trailReady: b
       y: origin.y + offsetY,
     };
   }
+  return { aim, landing, distance: Math.min(distance / pixelsPerMeter, range), clipped };
+}
+
+export function planCoralCast(
+  point: CastPoint, upgraded: boolean, trailReady: boolean, trailCompleted = false,
+): CoralCast {
+  const { shoal, shoalRadius, kelp, kelpRadius, trail, trailRadius } = CORAL_CAST;
+  const range = coralCastRange(upgraded);
+  const geometry = projectWithinLine(point, range, CORAL_CAST);
+  const { landing } = geometry;
   const kelpDistance = ellipseDistance(landing, kelp, kelpRadius);
   const inKelp = upgraded && kelpDistance <= 1;
-  const atTrail = inKelp && trailReady &&
+  const atTrail = inKelp && trailReady && !trailCompleted &&
     Math.hypot(landing.x - trail.x, landing.y - trail.y) <= trailRadius;
   const habitat = atTrail ? 'trail' : inKelp ? 'kelp' : kelpDistance <= 1.35 ? 'edge' : 'shoal';
   // In open shallow water, common foragers can always reach a stray bait.
-  const landingMeters = Math.min(distance / pixelsPerMeter, range);
-  const shoalInterior = landingMeters < 95 && ellipseDistance(landing, shoal, shoalRadius) <= 1;
+  const shoalInterior = geometry.distance < 95 && ellipseDistance(landing, shoal, shoalRadius) <= 1;
   const pool = habitat === 'shoal' && !shoalInterior ? 'edge' : habitat;
+  const specimenRecapture = habitat === 'kelp' && trailCompleted;
   return {
-    aim, landing, range, distance: landingMeters, clipped, habitat,
+    ...geometry, sea: 0, range, driftEnd: landing, habitat, specimenRecapture,
     layer: inKelp ? 'deep' : 'shallow',
-    candidates: coralBaitPools[pool],
+    candidates: specimenRecapture ? [...coralBaitPools.kelp, seas[0].trailId] : coralBaitPools[pool],
   };
 }
-export const pickCoralFish = (cast: CoralCast, rng = Math.random) => pickFromPool(cast.candidates, rng);
+
+export function planCurrentCast(point: CastPoint, upgraded: boolean): CurrentCast {
+  const map = CURRENT_CAST;
+  const range = currentCastRange(upgraded);
+  const geometry = projectWithinLine(point, range, map);
+  // The same taut line constrains both the splash and the downstream bait.
+  const driftEnd = projectWithinLine({
+    x: geometry.landing.x + map.drift.x,
+    y: geometry.landing.y + map.drift.y,
+  }, range, map).landing;
+  const deep = upgraded && driftEnd.y >= map.deepWaterY;
+  let habitat: CurrentCast['habitat'] = 'channel';
+  if (deep && ellipseDistance(driftEnd, map.deepFeeding, map.deepRadius) <= 1) habitat = 'deepFeeding';
+  if (!deep && ellipseDistance(driftEnd, map.feeding, map.feedingRadius) <= 1) habitat = 'feeding';
+  const pool = deep && habitat === 'channel' ? 'deepChannel' : habitat;
+  return {
+    ...geometry, sea: 1, range, driftEnd, habitat, layer: deep ? 'deep' : 'shallow',
+    candidates: currentBaitPools[pool], specimenRecapture: false,
+  };
+}
+
+export function pickBaitFish(cast: BaitCast, rng = Math.random) {
+  if (cast.specimenRecapture) {
+    if (rng() < seahorseBiteChance) return seas[0].trailId;
+    return pickFromPool(coralBaitPools.kelp, rng);
+  }
+  return pickFromPool(cast.candidates, rng);
+}
+export const pickCoralFish = pickBaitFish;
 
 const baseRounds = (rank: number) => rank >= 9 ? 3 : rank >= 4 ? 2 : 1;
 export function fishingRules(rank: number, sea: number, rod: number) {
