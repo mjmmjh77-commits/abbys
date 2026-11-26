@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright-core';
 import { fresh, salePrice, seas } from '../src/model.ts';
+import { playFight } from './play-fight.mjs';
 
 const key = 'abyss-fishing-v2';
 const browser = await chromium.launch({
@@ -40,29 +41,15 @@ try {
   await reload();
   assert.equal(await panel.getAttribute('data-state'), 'ready');
 
+  await page.locator('#trail-cast:enabled').waitFor();
   await page.evaluate(() => {
     const button = document.getElementById('trail-cast');
     button.click();
     button.click();
   });
-  const deadline = Date.now() + 35_000;
-  while ((await panel.getAttribute('data-state')) !== 'complete') {
-    assert.ok(Date.now() < deadline, '흔적 낚시 완료 시간');
-    await page.evaluate(() => {
-      const dot = document.getElementById('fish-dot');
-      if (dot) {
-        const box = dot.getBoundingClientRect();
-        document.getElementById('track').dispatchEvent(new PointerEvent('pointermove', {
-          clientX: box.x + box.width / 2,
-        }));
-      }
-      const marker = document.getElementById('timing-dot');
-      if (marker && Math.abs(parseFloat(marker.style.left) - 50) < 3) {
-        document.getElementById('timing-hit').click();
-      }
-    });
-    await page.waitForTimeout(40);
-  }
+  await page.locator('#track').waitFor();
+  await playFight(page);
+  assert.equal(await panel.getAttribute('data-state'), 'complete');
   const after = await saved();
   const id = seas[0].trailId;
   assert.equal(after.trailCompleted[0], true);

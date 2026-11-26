@@ -148,7 +148,7 @@ try {
   await $('#book').click();
   const card = $('.fish-card').filter({hasText:fish.name});
   assert.match(await card.innerText(), new RegExp('최대 ' + fish.maxCm + ' cm.*포획 2마리'));
-  assert.equal(await card.getByText('✓ 해역 관찰 표본', {exact:true}).count(), 1);
+  assert.equal(await card.getByText(/^✓ 해역 관찰 표본.*깊은 해초밭/).count(), 1);
   assert.equal(await card.getByTitle('발견한 황금 변종').count(), 1);
   assert.deepEqual(errors, []);
   console.log('PASS 구형 저장의 보스 우선 승리·출항·귀항, 뒤늦은 표본 등록, 해초밭 일반 인카운터의 황금 재포획', receipt);

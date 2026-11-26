@@ -288,7 +288,7 @@ function refreshTrail() {
       : `깊은 층 수동 포획 ${count}/${TRAIL_REQUIRED_CATCHES}마리`;
   }
   const button = $<HTMLButtonElement>('trail-cast');
-  button.disabled = busy || !ready;
+  button.disabled = busy || !ready || (coral && !ocean.bg);
   button.textContent = complete ? '관찰 완료' : '흔적 따라 낚기';
 }
 function showAim(plan: BaitCast) {

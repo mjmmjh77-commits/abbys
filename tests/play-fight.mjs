@@ -9,7 +9,7 @@ export async function mapPoint(page, x, y) {
 
 // Read the same markers, target zones and cues shown to a player. Send browser
 // input; do not call game functions, set progress, or advance the game clock.
-export async function playFight(page, { tracking = 'mouse', onRhythm } = {}) {
+export async function playFight(page, { tracking = 'mouse' } = {}) {
   const overlay = page.locator('#minigame');
   await overlay.waitFor();
   await overlay.scrollIntoViewIfNeeded();
@@ -43,13 +43,14 @@ export async function playFight(page, { tracking = 'mouse', onRhythm } = {}) {
         if (timing) {
           // Act on the displayed frame. A round trip to the test process can
           // outlast a narrow timing window when several browsers share a CPU.
-          if (Math.abs(parseFloat(timing.style.left) - 50) < 3) {
+          const zone = timing.parentElement.querySelector('.target-zone');
+          if (Math.abs(parseFloat(timing.style.left) - 50) <= parseFloat(zone.style.width) / 2) {
             document.querySelector('#timing-hit').click();
           }
           return {};
         }
         const rhythm = document.querySelector('#rhythm-hit');
-        if (rhythm) return { rhythm: true, hit: rhythm.textContent.includes('지금 당기기') };
+        if (rhythm) return { hit: rhythm.textContent.includes('지금 당기기') };
         const ring = document.querySelector('#ring');
         if (ring?.textContent === '길게 누르기') return { bossHold: true };
         if (ring?.style.background === 'rgb(80, 118, 91)') return { bossHit: true };
@@ -69,8 +70,7 @@ export async function playFight(page, { tracking = 'mouse', onRhythm } = {}) {
         if (control.acquireHold) await page.mouse.click(...control.move);
         else if (control.move) await page.mouse.move(...control.move);
       }
-      if (control.rhythm && onRhythm) await onRhythm(page);
-      else if (control.hit) await page.keyboard.press('Space');
+      if (control.hit) await page.keyboard.press('Space');
       if (control.bossHold) await page.keyboard.press('Enter', { delay: 800 });
       if (control.bossHit) await page.keyboard.press('Enter');
       await page.waitForTimeout(35);
