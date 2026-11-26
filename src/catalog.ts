@@ -1,5 +1,6 @@
 export type Layer = 'shallow' | 'deep';
 const coralDepth = { boundary: 100, end: 200 } as const;
+const currentDepth = { boundary: 600, end: 1000 } as const;
 type FishEntry = [
   id: number,
   name: string,
@@ -76,8 +77,7 @@ const habitats: Habitat[] = [
     perk: '물살이 잦아들 때 타이밍 입력',
     color: 0x60aad1,
     start: 200,
-    boundary: 600,
-    end: 1000,
+    ...currentDepth,
     target: 14,
     lineCost: 260,
     reelCost: 200,
@@ -85,7 +85,7 @@ const habitats: Habitat[] = [
     floor: 30,
     modes: ['timing', 'track', 'rhythm'],
     shallow: [10, 12, 13, 14, 11],
-    deep: [11, 15, 16, 17, 18, 19],
+    deep: [11, 15, 16, 17, 18, 19, 10],
     fish: [
       [10, '청새치', 1, 90, 310, '긴 주둥이로 먹잇감 무리를 가릅니다.'],
       [11, '날치', 1, 16, 48, '넓은 가슴지느러미로 수면을 스칩니다.'],
@@ -242,4 +242,25 @@ export const coralBaitPools = {
   edge: coral.shallow.filter((id) => species[id].rank < 2),
   kelp: coral.deep.filter((id) => !coral.shallow.includes(id) && id !== coral.trailId),
   trail: [coral.trailId],
+};
+export const seahorseBiteChance = 0.04;
+export const CURRENT_CAST = {
+  origin: CORAL_CAST.origin,
+  waterline: CORAL_CAST.waterline,
+  pixelsPerMeter: 0.62,
+  depth: currentDepth,
+  drift: { x: 148, y: 18 },
+  upstream: { x: 480, y: 307 },
+  feeding: { x: 628, y: 325 },
+  feedingRadius: { x: 79, y: 49 },
+  deep: { x: 680, y: 441 },
+  deepFeeding: { x: 828, y: 459 },
+  deepRadius: { x: 92, y: 58 },
+  deepWaterY: 395,
+} as const;
+export const currentBaitPools = {
+  channel: [10, 11],
+  feeding: [12, 13, 14],
+  deepChannel: [10, 11, 15, 16],
+  deepFeeding: [17, 18, 19],
 };

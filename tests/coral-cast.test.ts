@@ -95,10 +95,11 @@ test('기존 조사량과 보스·해역을 보존하고 다른 해역의 수동
   assert.deepEqual(s.unlocked, old.unlocked);
   assert.deepEqual(s.deepCaught, old.deepCaught);
   assert.equal(bossReady(s), true);
-  s.sea = 1;
+  s.sea = 2;
+  s.unlocked[2] = true;
   s.layer = 'deep';
-  s.line[1] = true;
-  assert.equal(settleCatch(s, 19, false, 'manual').surveyGain, 1);
+  s.line[2] = true;
+  assert.equal(settleCatch(s, 29, false, 'manual').surveyGain, 1);
   assert.equal(bossProgress(s), 1);
   assert.equal(bossProgress(s, 0), 8);
 });
