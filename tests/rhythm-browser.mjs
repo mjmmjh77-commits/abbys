@@ -33,23 +33,25 @@ try {
     }
   });
 
-  // Play the two prerequisite rounds using their normal DOM controls on each
-  // displayed frame, so setup doesn't depend on test-runner round trip latency.
-  await page.evaluate(() => new Promise((resolve, reject) => {
-    const deadline = performance.now() + 45000;
-    let reeling = false;
-    let sawTitle = false;
+  // React to the actual rendered frame. A round trip to the runner between
+  // spotting green and clicking can outlast the narrowest window on a busy CI host.
+  const result = await page.evaluate(() => new Promise((resolve, reject) => {
+    const deadline = performance.now() + 60000;
+    const scores = [];
+    let reeling = false, sawTitle = false, wasGreen = false, windows = 0;
+    function space(target, type, repeat = false) {
+      target.dispatchEvent(new KeyboardEvent(type, { code: 'Space', key: ' ', repeat, bubbles: true, cancelable: true }));
+    }
     function act() {
-      const title = document.querySelector('.fight-card h2')?.textContent;
-      if (title?.includes('왕관심해어')) sawTitle = true;
-      if (document.querySelector('#rhythm-hit') && sawTitle) return resolve();
+      if (document.querySelector('.fight-card h2')?.textContent.includes('왕관심해어')) sawTitle = true;
+      if (windows === 5 && document.getElementById('minigame').hidden) return resolve({ scores, sawTitle });
       if (document.querySelector('#retry') || performance.now() > deadline) {
-        return reject(new Error('왕관심해어의 리듬 라운드에 도달하지 못했습니다.'));
+        return reject(new Error('왕관심해어 라운드 실패 · ' + windows + '개 리듬 기회 · ' + scores.join(', ')));
       }
+
       const reel = document.querySelector('#tension-reel');
       if (reel) {
-        const tension = parseFloat(document.querySelector('#tension-meter').style.left);
-        const pull = tension < 52;
+        const pull = parseFloat(document.querySelector('#tension-meter').style.left) < 52;
         if (pull !== reeling) {
           reel.dispatchEvent(new PointerEvent(pull ? 'pointerdown' : 'pointerup', { pointerType: 'mouse' }));
           reeling = pull;
@@ -59,45 +61,43 @@ try {
       if (hold && !hold.classList.contains('holding')) {
         hold.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch' }));
       }
+
+      const hit = document.querySelector('#rhythm-hit');
+      if (hit) {
+        const green = hit.textContent.includes('지금 당기기');
+        if (green && !wasGreen) {
+          windows++;
+          switch (windows) {
+            case 1:
+              for (let i = 0; i < 4; i++) hit.click();
+              break;
+            case 2:
+              space(hit, 'keydown'); // Hold until the next whole green window.
+              break;
+            case 3:
+              space(hit, 'keydown', true);
+              space(hit, 'keyup');
+              break;
+            case 4:
+              space(hit, 'keydown');
+              space(hit, 'keyup');
+              break;
+            case 5:
+              hit.click();
+              break;
+          }
+          if (windows < 5) scores.push(document.getElementById('rhythm-score').textContent);
+        }
+        // The credited marker '명중 ✓' still belongs to this same crossing.
+        wasGreen = green || hit.textContent.includes('명중');
+      }
       requestAnimationFrame(act);
     }
-    document.querySelector('#cast').click();
+    document.getElementById('cast').click();
     requestAnimationFrame(act);
   }));
-
-  const hit = page.locator('#rhythm-hit'), score = page.locator('#rhythm-score');
-  const rect = await hit.boundingBox();
-  const click = count => page.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2, { clickCount: count });
-  const waitGreen = () => page.waitForFunction(
-    () => document.getElementById('rhythm-hit')?.textContent.includes('지금 당기기'));
-  const waitOutside = () => page.waitForFunction(
-    () => document.getElementById('rhythm-hit')?.textContent.includes('박자에 맞춰'));
-  const checkHits = async n => assert.equal(await score.innerText(), '명중 ' + n + '/4 · 빗나감 0/2');
-
-  await waitGreen();
-  await click(4);
-  await checkHits(1);
-  await waitOutside();
-
-  await waitGreen();
-  await page.keyboard.down('Space');
-  await checkHits(2);
-  await waitOutside();
-  await waitGreen();
-  await page.keyboard.down('Space'); // Browser auto-repeat while still held.
-  await checkHits(2);
-  await waitOutside();
-  await page.keyboard.up('Space');
-  await checkHits(2);
-
-  await waitGreen();
-  await page.keyboard.press('Space');
-  await checkHits(3);
-  await waitOutside();
-  await waitGreen();
-  await click(1);
-  await hit.waitFor({ state: 'detached' });
-  await page.waitForFunction(() => document.querySelector('#minigame').hidden);
+  assert.ok(result.sawTitle);
+  assert.deepEqual(result.scores, [1, 2, 2, 3].map(n => '명중 ' + n + '/4 · 빗나감 0/2'));
   const saved = await page.evaluate(key => JSON.parse(localStorage.getItem(key)), KEY);
   assert.equal(saved.counts[49], 1);
   assert.equal(saved.misses, 0);
